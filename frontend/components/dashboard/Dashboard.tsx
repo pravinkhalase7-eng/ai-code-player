@@ -2,19 +2,20 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Clapperboard, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { createLesson, getHealth, listLessons } from "@/lib/api";
 import { LANGUAGES, topicForLanguage, type LessonLanguage } from "@/lib/language";
 import { cn } from "@/lib/utils";
-import type { LessonSummary } from "@/types/lesson";
+import type { LessonFormat, LessonSummary } from "@/types/lesson";
 
 export function Dashboard() {
   const router = useRouter();
   const [topic, setTopic] = useState("Explain Java for loop");
   const [language, setLanguage] = useState<LessonLanguage>("java");
+  const [format, setFormat] = useState<LessonFormat>("lesson");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [lessons, setLessons] = useState<LessonSummary[]>([]);
@@ -39,7 +40,7 @@ export function Dashboard() {
     setBusy(true);
     setError("");
     try {
-      const created = await createLesson(topic || "for loop", language, "beginner");
+      const created = await createLesson(topic || "for loop", language, "beginner", format);
       router.push(`/learn/${created.lesson_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the lesson");
@@ -57,6 +58,7 @@ export function Dashboard() {
         </h1>
         <p className="mt-4 max-w-2xl text-lg text-zinc-400">
           Ask for a concept. Byte generates a lesson, types the code, runs it in a sandbox, and walks through every iteration.
+          Or cut a 30-second catchy short you can watch like a reel.
         </p>
       </div>
 
@@ -82,10 +84,37 @@ export function Dashboard() {
             </button>
           ))}
         </div>
+        <div className="mb-4 grid gap-2 sm:grid-cols-2">
+          {(
+            [
+              { id: "lesson" as const, label: "Full lesson", hint: "Walkthrough, execution, quiz" },
+              { id: "reel" as const, label: "30s Short", hint: "Catchy hook, code, punchline" },
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              aria-pressed={format === item.id}
+              onClick={() => setFormat(item.id)}
+              className={cn(
+                "rounded-2xl border px-4 py-3 text-left transition",
+                format === item.id
+                  ? "border-amber-300/60 bg-amber-400/15 text-white"
+                  : "border-white/10 bg-white/5 text-zinc-300 hover:border-amber-300/30",
+              )}
+            >
+              <span className="flex items-center gap-2 text-sm font-semibold">
+                {item.id === "reel" ? <Clapperboard className="h-4 w-4 text-amber-300" /> : <Sparkles className="h-4 w-4 text-amber-300" />}
+                {item.label}
+              </span>
+              <span className="mt-1 block text-xs text-zinc-400">{item.hint}</span>
+            </button>
+          ))}
+        </div>
         <div className="flex flex-col gap-3 md:flex-row">
           <Input value={topic} onChange={(event) => setTopic(event.target.value)} />
           <Button onClick={start} disabled={busy} className="md:w-48">
-            {busy ? "Preparing..." : "Start Learning"}
+            {busy ? "Preparing..." : format === "reel" ? "Make a Short" : "Start Learning"}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
@@ -116,7 +145,7 @@ export function Dashboard() {
                     <div className="flex items-center justify-between gap-3">
                       <p className="font-semibold text-white">{lesson.title}</p>
                       <span className="text-xs uppercase text-amber-200">
-                        {lesson.status === "ready" ? lesson.language : lesson.status}
+                        {lesson.format === "reel" ? "30s short" : lesson.status === "ready" ? lesson.language : lesson.status}
                       </span>
                     </div>
                     <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">

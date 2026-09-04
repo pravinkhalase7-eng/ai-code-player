@@ -12,6 +12,11 @@ class LessonLevel(str, Enum):
     advanced = "advanced"
 
 
+class LessonFormat(str, Enum):
+    lesson = "lesson"
+    reel = "reel"
+
+
 class SceneType(str, Enum):
     intro = "intro"
     concept = "concept"
@@ -197,6 +202,7 @@ class LessonObjective(BaseModel):
 class TutorPlan(BaseModel):
     language: str = Field(min_length=1, max_length=32)
     level: LessonLevel = LessonLevel.beginner
+    format: LessonFormat = LessonFormat.lesson
     topic: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=1, max_length=160)
     skill_assessment: str = Field(default="beginner", max_length=80)
@@ -210,6 +216,7 @@ class Lesson(BaseModel):
     title: str = Field(min_length=1, max_length=160)
     language: str = Field(min_length=1, max_length=32)
     level: LessonLevel = LessonLevel.beginner
+    format: LessonFormat = LessonFormat.lesson
     topic: str = Field(min_length=1, max_length=200)
     objectives: list[str] = Field(min_length=1, max_length=8)
     concepts: list[str] = Field(default_factory=list)
@@ -224,7 +231,10 @@ class Lesson(BaseModel):
     @model_validator(mode="after")
     def _required_scene_types(self) -> Lesson:
         types = {scene.type for scene in self.scenes}
-        missing = {"intro", "code", "quiz"} - types
+        if self.format == LessonFormat.reel:
+            missing = {"intro", "code", "summary"} - types
+        else:
+            missing = {"intro", "code", "quiz"} - types
         if missing:
             raise ValueError(f"lesson is missing required scenes: {sorted(missing)}")
         return self
@@ -261,6 +271,7 @@ class LessonDraft(BaseModel):
     title: str = Field(min_length=1, max_length=160)
     language: str = Field(min_length=1, max_length=32)
     level: LessonLevel = LessonLevel.beginner
+    format: LessonFormat = LessonFormat.lesson
     topic: str = Field(min_length=1, max_length=200)
     objectives: list[str] = Field(min_length=1, max_length=8)
     concepts: list[str] = Field(default_factory=list)
@@ -268,7 +279,11 @@ class LessonDraft(BaseModel):
 
 
 def lesson_from_draft(draft: LessonDraft) -> Lesson:
-    return Lesson.model_validate(draft.model_dump(mode="json"))
+    data = draft.model_dump(mode="json")
+    types = {scene.get("type") for scene in data.get("scenes", [])}
+    if data.get("format") != "reel" and "quiz" not in types and {"intro", "code", "summary"} <= types:
+        data["format"] = "reel"
+    return Lesson.model_validate(data)
 
 
 class ChatReply(BaseModel):

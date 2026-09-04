@@ -47,6 +47,23 @@ def test_create_lesson_queues_job() -> None:
     assert lesson.status_code == 200
 
 
+def test_create_reel_queues_job() -> None:
+    response = client.post(
+        "/api/v1/tutor/lesson",
+        json={"topic": "for loop", "language": "java", "level": "beginner", "format": "reel"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["lesson_id"]
+    lesson = client.get(f"/api/v1/lesson/{body['lesson_id']}")
+    assert lesson.status_code == 200
+    listed = client.get("/api/v1/lessons")
+    assert listed.status_code == 200
+    match = next((item for item in listed.json()["lessons"] if item["lesson_id"] == body["lesson_id"]), None)
+    assert match is not None
+    assert match["format"] == "reel"
+
+
 def test_quiz_and_progress(tmp_path: Path) -> None:
     db = SessionLocal()
     try:

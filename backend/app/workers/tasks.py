@@ -29,6 +29,7 @@ def run_job(job_id: str, kind: str) -> None:
                 payload["topic"],
                 payload.get("language", "java"),
                 payload.get("level", "beginner"),
+                payload.get("format", "lesson"),
             )
             set_job(
                 db,

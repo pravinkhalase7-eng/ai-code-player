@@ -4,7 +4,7 @@ import logging
 import re
 
 from app.config import settings
-from app.schemas.lesson import ChatReply, EvaluationResult, Lesson, LessonDraft, TutorPlan, lesson_from_draft
+from app.schemas.lesson import ChatReply, EvaluationResult, Lesson, LessonDraft, LessonFormat, TutorPlan, lesson_from_draft
 from app.services.gemini_client import generate_text, structured_generate
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ Hard rules:
 - Durations: intro 18-28s, concept 28-45s, code 30-50s, execution 16-28s, terminal 12-20s, quiz 16-24s, summary 16-24s.
 - language must match the tutor plan. Set filename to Main.java, main.py, or main.js to match.
 - lesson_id should be a short slug.
+- format must be "lesson".
 
 Java for-loop example ONLY when the topic is loops:
 
@@ -77,9 +78,29 @@ public class Main {
             .filter(n -> n % 2 == 0)
             .map(n -> n * 2)
             .collect(Collectors.toList());
-        System.out.println(evensDoubled);
+            System.out.println(evensDoubled);
     }
 }
+""".strip()
+
+REEL_PLANNER_INSTRUCTION = """
+You are the Lesson Planner Agent for a 30-SECOND CATCHY CODING REEL (TikTok / Instagram Reels / YouTube Shorts).
+Create a fast, hooky visual short. Total spoken time across ALL scenes MUST be about 30 seconds (70-90 words total).
+
+Required scenes IN THIS ORDER: intro, code, execution, summary.
+Do NOT include concept or quiz scenes.
+
+Hard rules:
+- Intro (6-8s): Hook in the first sentence. Pattern interrupt. Name the concept. Energetic, spoken to camera.
+- Code (10-12s): Tiny complete runnable example of THIS topic. Narrate the one trick, not every line. 1-3 highlight_ranges.
+- Execution (6-8s): Same example. Say what the output proves. expected_output must be an empty list.
+- Summary (4-6s): One punchy takeaway. 2-3 short takeaways max. End with save-this energy.
+- Spoken style: short sentences, no filler ("so", "basically", "in this video we will"). Catchy, not a lecture.
+- Java: public class Main in Main.java. Python: complete main.py. JavaScript: complete main.js.
+- Never invent stdout. Never claim the code already ran.
+- format must be "reel".
+- language must match the tutor plan. Set filename to Main.java, main.py, or main.js to match.
+- lesson_id should be a short slug.
 """.strip()
 
 CODE_INSTRUCTION = """
@@ -134,6 +155,7 @@ class AgentSpec:
 
 TUTOR_AGENT = AgentSpec("tutor_agent", TUTOR_INSTRUCTION, TutorPlan, 0.3)
 PLANNER_AGENT = AgentSpec("lesson_planner_agent", PLANNER_INSTRUCTION, LessonDraft, 0.25)
+REEL_PLANNER_AGENT = AgentSpec("reel_planner_agent", REEL_PLANNER_INSTRUCTION, LessonDraft, 0.35)
 CODE_AGENT = AgentSpec("code_agent", CODE_INSTRUCTION, LessonDraft, 0.15)
 VISUAL_AGENT = AgentSpec("visual_agent", VISUAL_INSTRUCTION, LessonDraft, 0.2)
 QUIZ_AGENT = AgentSpec("quiz_agent", QUIZ_INSTRUCTION, LessonDraft, 0.2)
@@ -193,38 +215,55 @@ def invoke_agent(spec: AgentSpec, user_message: str):
         label=spec.name,
     )
     if isinstance(result, LessonDraft):
+        if spec.name == "reel_planner_agent":
+            result.format = LessonFormat.reel
         return lesson_from_draft(result)
     return result
 
 
-def plan_lesson(topic: str, language: str, level: str) -> TutorPlan:
-    message = f"Topic: {topic}\nLanguage: {language}\nRequested level: {level}"
+def plan_lesson(topic: str, language: str, level: str, format: str = "lesson") -> TutorPlan:
+    fmt = "reel" if format == "reel" else "lesson"
+    message = (
+        f"Topic: {topic}\nLanguage: {language}\nRequested level: {level}\nFormat: {fmt}\n"
+    )
+    if fmt == "reel":
+        message += "This is a 30-second catchy short/reel, not a full lesson. Keep the plan tight."
     plan = invoke_agent(TUTOR_AGENT, message)
     assert isinstance(plan, TutorPlan)
     if language:
         plan.language = language.lower()
+    plan.format = LessonFormat.reel if fmt == "reel" else LessonFormat.lesson
     return plan
 
 
 def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
+    is_reel = plan.format == LessonFormat.reel
     message = (
-        f"Create the lesson. Teach THIS topic completely; do not substitute a different concept.\n"
+        f"Create the {'30-second catchy reel' if is_reel else 'lesson'}. Teach THIS topic; do not substitute a different concept.\n"
         f"lesson_id={lesson_id}\n"
         f"title={plan.title}\n"
         f"topic={plan.topic}\n"
         f"language={plan.language}\n"
         f"level={plan.level.value}\n"
+        f"format={plan.format.value}\n"
         f"objectives={plan.objectives}\n"
         f"concepts={plan.concepts}\n"
         f"greeting={plan.greeting}\n"
     )
-    lesson = invoke_agent(PLANNER_AGENT, message)
+    planner = REEL_PLANNER_AGENT if is_reel else PLANNER_AGENT
+    lesson = invoke_agent(planner, message)
     assert isinstance(lesson, Lesson)
     lesson.lesson_id = lesson_id
     lesson.language = plan.language
     lesson.level = plan.level
+    lesson.format = LessonFormat.reel if is_reel else LessonFormat.lesson
     lesson.topic = plan.topic
-    lesson.title = plan.title or lesson.title
+    if is_reel:
+        title = plan.title or lesson.title
+        lesson.title = title if title.lower().startswith("30s") else f"30s: {title}"
+        lesson = _normalize_reel(lesson)
+    else:
+        lesson.title = plan.title or lesson.title
     lesson = _fit_scene_durations(lesson)
 
     has_code = any(
@@ -252,14 +291,46 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
         lesson = invoke_agent(VISUAL_AGENT, lesson.model_dump_json())
         assert isinstance(lesson, Lesson)
     has_quiz = any(scene.type == "quiz" for scene in lesson.scenes)
-    if not has_quiz:
+    if not has_quiz and lesson.format != LessonFormat.reel:
         lesson = invoke_agent(QUIZ_AGENT, lesson.model_dump_json())
         assert isinstance(lesson, Lesson)
     lesson.lesson_id = lesson_id
+    lesson.format = plan.format
+    if lesson.format == LessonFormat.reel:
+        lesson = _normalize_reel(lesson)
     return _fit_scene_durations(lesson)
 
 
+def _normalize_reel(lesson: Lesson) -> Lesson:
+    from app.schemas.lesson import IntroScene, SummaryScene
+
+    allowed = {"intro", "code", "execution", "terminal", "summary"}
+    scenes = [scene for scene in lesson.scenes if scene.type in allowed]
+    types = {scene.type for scene in scenes}
+    if "intro" not in types:
+        scenes.insert(
+            0,
+            IntroScene(
+                id="scene_reel_hook",
+                duration=6,
+                narration=f"Stop scrolling. Here is {lesson.topic} in 30 seconds.",
+            ),
+        )
+    if "summary" not in types:
+        scenes.append(
+            SummaryScene(
+                id="scene_reel_end",
+                duration=5,
+                narration="That's the trick. Save this and try it in your own file.",
+                takeaways=["Try it yourself", lesson.topic],
+            ),
+        )
+    return lesson.model_copy(update={"format": LessonFormat.reel, "scenes": scenes})
+
+
 def _fit_scene_durations(lesson: Lesson) -> Lesson:
+    if lesson.format == LessonFormat.reel:
+        return _fit_reel_durations(lesson)
     updated = []
     for scene in lesson.scenes:
         words = max(1, len(scene.narration.split()))
@@ -269,6 +340,30 @@ def _fit_scene_durations(lesson: Lesson) -> Lesson:
         elif scene.type == "concept":
             spoken = max(spoken, 24.0)
         updated.append(scene.model_copy(update={"duration": round(spoken, 1)}))
+    return lesson.model_copy(update={"scenes": updated})
+
+
+def _fit_reel_durations(lesson: Lesson) -> Lesson:
+    target = 30.0
+    caps = {
+        "intro": (5.5, 8.0),
+        "code": (9.0, 12.0),
+        "execution": (5.5, 8.0),
+        "terminal": (4.0, 6.0),
+        "summary": (4.0, 6.0),
+    }
+    raw: list[float] = []
+    for scene in lesson.scenes:
+        words = max(1, len(scene.narration.split()))
+        spoken = min(12.0, max(4.0, words / 2.6 + 0.6))
+        low, high = caps.get(scene.type, (4.0, 8.0))
+        raw.append(min(high, max(low, spoken)))
+    total = sum(raw) or 1.0
+    scale = target / total
+    updated = []
+    for scene, spoken in zip(lesson.scenes, raw, strict=True):
+        duration = round(max(3.5, min(12.0, spoken * scale)), 1)
+        updated.append(scene.model_copy(update={"duration": duration}))
     return lesson.model_copy(update={"scenes": updated})
 
 

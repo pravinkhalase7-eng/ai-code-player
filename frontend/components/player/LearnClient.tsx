@@ -13,6 +13,11 @@ const STATUS_COPY: Record<string, string> = {
   running: "Byte is writing the walkthrough and recording a natural voice…",
 };
 
+const REEL_STATUS_COPY: Record<string, string> = {
+  queued: "Byte is lining up a 30-second short…",
+  running: "Byte is cutting a catchy reel and recording the voice…",
+};
+
 export function LearnClient({ lessonId }: { lessonId: string }) {
   const router = useRouter();
   const [lesson, setLesson] = useState<Lesson | null>(null);
@@ -99,7 +104,12 @@ export function LearnClient({ lessonId }: { lessonId: string }) {
     setRetrying(true);
     setError("");
     try {
-      const created = await createLesson(topic, lesson?.language || "java", lesson?.level || "beginner");
+      const created = await createLesson(
+        topic,
+        lesson?.language || "java",
+        lesson?.level || "beginner",
+        lesson?.format || "lesson",
+      );
       router.replace(`/learn/${created.lesson_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start a new lesson");
@@ -127,7 +137,12 @@ export function LearnClient({ lessonId }: { lessonId: string }) {
     return (
       <div className="flex min-h-[70vh] flex-col items-center justify-center gap-4 px-6 text-center">
         <div className="h-16 w-16 animate-spin rounded-full border-4 border-amber-300/20 border-t-amber-300" />
-        <p className="text-zinc-300">{STATUS_COPY[status] ?? "Byte is preparing your visual lesson…"}</p>
+        <p className="text-zinc-300">
+          {(lesson?.format === "reel" ? REEL_STATUS_COPY[status] : STATUS_COPY[status]) ??
+            (lesson?.format === "reel"
+              ? "Byte is cutting your 30-second short…"
+              : "Byte is preparing your visual lesson…")}
+        </p>
         <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">
           {status}
           {elapsed > 0 ? ` · ${elapsed}s` : ""}

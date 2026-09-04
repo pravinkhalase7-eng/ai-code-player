@@ -21,6 +21,7 @@ export function CodeWorkbench({
   highlight,
   onChange,
   readOnly = false,
+  compact = false,
 }: {
   code: string;
   language?: string;
@@ -28,6 +29,7 @@ export function CodeWorkbench({
   highlight?: HighlightRange | null;
   onChange?: (value: string) => void;
   readOnly?: boolean;
+  compact?: boolean;
 }) {
   const monacoLanguage = LANGUAGE_MAP[language] ?? "java";
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
@@ -79,8 +81,8 @@ export function CodeWorkbench({
   }, [decorations, highlight]);
 
   return (
-    <div className="flex h-full min-h-[280px] overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]">
-      <aside className="hidden w-40 border-r border-white/10 bg-black/20 p-3 text-xs text-zinc-400 md:block">
+    <div className={cn("flex h-full overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]", compact ? "min-h-0" : "min-h-[280px]")}>
+      <aside className={cn("w-40 border-r border-white/10 bg-black/20 p-3 text-xs text-zinc-400", compact ? "hidden" : "hidden md:block")}>
         <div className="mb-2 flex items-center gap-2 font-semibold text-zinc-200">
           <FolderOpen className="h-3.5 w-3.5 text-amber-300" />
           Explorer
@@ -96,7 +98,7 @@ export function CodeWorkbench({
             {filename}
           </div>
         </div>
-        <div className={cn("min-h-[420px] flex-1", highlight && "tutor-has-highlight")}>
+        <div className={cn(compact ? "min-h-[220px] flex-1" : "min-h-[420px] flex-1", highlight && "tutor-has-highlight")}>
           <Editor
             value={code}
             language={monacoLanguage}

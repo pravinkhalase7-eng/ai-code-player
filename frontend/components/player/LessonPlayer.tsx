@@ -11,7 +11,7 @@ import { Terminal } from "@/components/player/Terminal";
 import { TutorAvatar } from "@/components/tutor/TutorAvatar";
 import { answerQuiz, executeCode, explainRunError, saveProgress, sendChat } from "@/lib/api";
 import { defaultCode, runCommand, sourceFilename } from "@/lib/language";
-import { audioSrc } from "@/lib/utils";
+import { audioSrc, cn } from "@/lib/utils";
 import { buildCues, cueAt } from "@/lib/narrationSync";
 import type { ExecutionStep, HighlightRange, Lesson, LessonScene, RunHelp, TutorExpression } from "@/types/lesson";
 
@@ -371,12 +371,15 @@ export function LessonPlayer({
 
   if (!scene) return null;
 
+  const isReel = lesson.format === "reel";
+  const reelTotal = Math.round(scenes.reduce((sum, item) => sum + (item.duration || 0), 0));
+
   return (
-    <div className="grid min-h-[calc(100vh-6rem)] grid-rows-[auto_1fr_auto_auto] gap-4">
+    <div className={cn("grid min-h-[calc(100vh-6rem)] gap-4", isReel ? "grid-rows-[auto_auto_1fr]" : "grid-rows-[auto_1fr_auto_auto]")}>
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-amber-200/80">
-            Scene {index + 1} of {scenes.length} · {scene.type}
+            {isReel ? `30s short · ${reelTotal}s` : `Scene ${index + 1} of ${scenes.length}`} · {scene.type}
           </p>
           <h1 className="text-2xl font-semibold text-white">{lesson.title}</h1>
         </div>
@@ -443,110 +446,158 @@ export function LessonPlayer({
         </p>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(0,1.4fr)]">
-        <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
-          <TutorAvatar expression={expression} speaking={playing} gesture="point_right" />
-          <p className="mt-4 text-sm leading-6 text-zinc-200">{caption}</p>
-          {highlight?.label ? (
-            <p className="mt-2 text-xs uppercase tracking-[0.2em] text-amber-300/80">
-              Highlighting {highlight.label}
-            </p>
-          ) : null}
-          {runHelp ? (
-            <div className="mt-4 space-y-3 rounded-2xl border border-red-400/30 bg-red-400/10 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-red-200">
-                {runHelp.issue}
-                {runHelp.line ? ` · line ${runHelp.line}` : ""}
-              </p>
-              <p className="text-sm leading-6 text-red-50">{runHelp.explanation}</p>
-              {runHelp.suggested_code ? (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setCode(runHelp.suggested_code || "");
-                    setRunHelp(null);
-                    setCaption("I applied the fix in the editor. Click Run to see if it compiles.");
-                    setExpression("explaining");
-                  }}
-                >
-                  Apply Byte’s fix
-                </Button>
-              ) : null}
+      {isReel ? (
+        <div className="mx-auto flex w-full justify-center">
+          <div className="reel-frame relative flex h-[min(68vh,640px)] w-auto max-w-full aspect-[9/16] flex-col overflow-hidden rounded-[2rem] border border-white/15 bg-zinc-950 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
+            <div className="flex items-center justify-between px-4 pt-4">
+              <TutorAvatar expression={expression} speaking={playing} gesture="point_right" className="items-start [&_svg]:h-16 [&_svg]:w-16" />
+              <span className="rounded-full bg-amber-400 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-950">
+                30s
+              </span>
             </div>
-          ) : null}
-          {scene.type === "concept" && scene.bullets?.length ? (
-            <ul className="mt-4 space-y-2 text-sm text-amber-100">
-              {scene.bullets.map((item) => (
-                <li key={item}>• {item}</li>
-              ))}
-            </ul>
-          ) : null}
-          {iterations.length ? (
-            <ExecutionStepper
-              steps={iterations}
-              stepIndex={stepIndex}
-              manual={manualStepping}
-              onStep={takeStep}
-              onRestart={() => takeStep(0)}
-            />
-          ) : null}
-          {scene.type === "quiz" ? (
-            <div className="mt-4">
-              <QuizCard
-                scene={scene}
-                result={quizResult}
-                onSubmit={async (answer, submittedCode) => {
-                  const response = await answerQuiz(scene.id, answer, submittedCode);
-                  setQuizResult(response.evaluation);
-                  setExpression(response.evaluation.status === "correct" ? "celebrating" : "confused");
-                }}
+            <div className="min-h-0 flex-1 px-3 py-2">
+              <CodeWorkbench
+                compact
+                code={code}
+                language={lesson.language}
+                filename={scene.filename || sourceFilename(lesson.language)}
+                highlight={highlight}
+                onChange={setCode}
               />
             </div>
-          ) : null}
-        </section>
-        <CodeWorkbench
-          code={code}
-          language={lesson.language}
-          filename={scene.filename || sourceFilename(lesson.language)}
-          highlight={highlight}
-          onChange={setCode}
-        />
-      </div>
-
-      <Terminal
-        command={scene.command || runCommand(lesson.language)}
-        lines={terminalLines}
-        stderr={runError || scene.stderr}
-        success={!runError}
-      />
-
-      <form
-        className="flex gap-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void ask();
-        }}
-      >
-        <input
-          value={chat}
-          onChange={(event) => setChat(event.target.value)}
-          placeholder="Ask your tutor..."
-          className="h-12 flex-1 rounded-2xl border border-white/10 bg-zinc-950/70 px-4 text-sm outline-none focus:border-amber-300/40"
-        />
-        <Button type="submit">
-          <Sparkles className="h-4 w-4" /> Ask
-        </Button>
-      </form>
-      {messages.length ? (
-        <div className="space-y-2 text-sm">
-          {messages.slice(-4).map((item, messageIndex) => (
-            <p key={`${item.role}-${messageIndex}`} className={item.role === "tutor" ? "text-amber-100" : "text-zinc-300"}>
-              <span className="font-semibold">{item.role === "tutor" ? "Byte" : "You"}: </span>
-              {item.text}
-            </p>
-          ))}
+            {scene.type === "execution" || scene.type === "terminal" || runOutput.length || runError ? (
+              <div className="px-3">
+                <Terminal
+                  command={scene.command || runCommand(lesson.language)}
+                  lines={terminalLines}
+                  stderr={runError || scene.stderr}
+                  success={!runError}
+                />
+              </div>
+            ) : null}
+            <div className="mt-auto bg-gradient-to-t from-black via-black/80 to-transparent px-5 pb-6 pt-16">
+              <p className="text-base font-medium leading-6 text-white">{caption}</p>
+              {highlight?.label ? (
+                <p className="mt-2 text-[10px] uppercase tracking-[0.25em] text-amber-300">{highlight.label}</p>
+              ) : null}
+              {scene.type === "summary" && scene.takeaways?.length ? (
+                <ul className="mt-3 space-y-1 text-sm text-amber-100">
+                  {scene.takeaways.map((item) => (
+                    <li key={item}>• {item}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </div>
         </div>
-      ) : null}
+      ) : (
+        <>
+          <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(0,1.4fr)]">
+            <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
+              <TutorAvatar expression={expression} speaking={playing} gesture="point_right" />
+              <p className="mt-4 text-sm leading-6 text-zinc-200">{caption}</p>
+              {highlight?.label ? (
+                <p className="mt-2 text-xs uppercase tracking-[0.2em] text-amber-300/80">
+                  Highlighting {highlight.label}
+                </p>
+              ) : null}
+              {runHelp ? (
+                <div className="mt-4 space-y-3 rounded-2xl border border-red-400/30 bg-red-400/10 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-red-200">
+                    {runHelp.issue}
+                    {runHelp.line ? ` · line ${runHelp.line}` : ""}
+                  </p>
+                  <p className="text-sm leading-6 text-red-50">{runHelp.explanation}</p>
+                  {runHelp.suggested_code ? (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setCode(runHelp.suggested_code || "");
+                        setRunHelp(null);
+                        setCaption("I applied the fix in the editor. Click Run to see if it compiles.");
+                        setExpression("explaining");
+                      }}
+                    >
+                      Apply Byte’s fix
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+              {scene.type === "concept" && scene.bullets?.length ? (
+                <ul className="mt-4 space-y-2 text-sm text-amber-100">
+                  {scene.bullets.map((item) => (
+                    <li key={item}>• {item}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {iterations.length ? (
+                <ExecutionStepper
+                  steps={iterations}
+                  stepIndex={stepIndex}
+                  manual={manualStepping}
+                  onStep={takeStep}
+                  onRestart={() => takeStep(0)}
+                />
+              ) : null}
+              {scene.type === "quiz" ? (
+                <div className="mt-4">
+                  <QuizCard
+                    scene={scene}
+                    result={quizResult}
+                    onSubmit={async (answer, submittedCode) => {
+                      const response = await answerQuiz(scene.id, answer, submittedCode);
+                      setQuizResult(response.evaluation);
+                      setExpression(response.evaluation.status === "correct" ? "celebrating" : "confused");
+                    }}
+                  />
+                </div>
+              ) : null}
+            </section>
+            <CodeWorkbench
+              code={code}
+              language={lesson.language}
+              filename={scene.filename || sourceFilename(lesson.language)}
+              highlight={highlight}
+              onChange={setCode}
+            />
+          </div>
+
+          <Terminal
+            command={scene.command || runCommand(lesson.language)}
+            lines={terminalLines}
+            stderr={runError || scene.stderr}
+            success={!runError}
+          />
+
+          <form
+            className="flex gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void ask();
+            }}
+          >
+            <input
+              value={chat}
+              onChange={(event) => setChat(event.target.value)}
+              placeholder="Ask your tutor..."
+              className="h-12 flex-1 rounded-2xl border border-white/10 bg-zinc-950/70 px-4 text-sm outline-none focus:border-amber-300/40"
+            />
+            <Button type="submit">
+              <Sparkles className="h-4 w-4" /> Ask
+            </Button>
+          </form>
+          {messages.length ? (
+            <div className="space-y-2 text-sm">
+              {messages.slice(-4).map((item, messageIndex) => (
+                <p key={`${item.role}-${messageIndex}`} className={item.role === "tutor" ? "text-amber-100" : "text-zinc-300"}>
+                  <span className="font-semibold">{item.role === "tutor" ? "Byte" : "You"}: </span>
+                  {item.text}
+                </p>
+              ))}
+            </div>
+          ) : null}
+        </>
+      )}
       <audio ref={audioRef} className="sr-only" preload="auto" playsInline />
     </div>
   );

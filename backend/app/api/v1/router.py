@@ -40,6 +40,7 @@ def create_lesson(payload: LessonCreateRequest, db: Session = Depends(get_db)) -
         language=payload.language.strip() or "java",
         level=payload.level.value,
         user_id=payload.user_id,
+        format=payload.format.value,
     )
     return LessonCreateResponse(lesson_id=lesson_id, status="queued", job_id=job_id)
 
@@ -120,8 +121,34 @@ def get_lesson(lesson_id: str, db: Session = Depends(get_db)) -> LessonResponse:
 
 
 def _pending_lesson(row: LessonRow) -> Lesson:
-    from app.schemas.lesson import IntroScene, CodeScene, QuizScene
+    from app.schemas.lesson import CodeScene, IntroScene, QuizScene, SummaryScene
 
+    fmt = (row.lesson_json or {}).get("format") or "lesson"
+    if fmt == "reel":
+        return Lesson(
+            lesson_id=row.id,
+            title=row.title,
+            language=row.language,
+            level=row.level,  # type: ignore[arg-type]
+            format="reel",  # type: ignore[arg-type]
+            topic=row.topic,
+            objectives=["Cutting a 30-second short"],
+            scenes=[
+                IntroScene(id="scene_pending", duration=6, narration="Give me a moment while I cut this 30-second short."),
+                CodeScene(
+                    id="scene_code_pending",
+                    duration=10,
+                    narration="The example will appear next.",
+                    code="public class Main {\n    public static void main(String[] args) {\n    }\n}\n",
+                ),
+                SummaryScene(
+                    id="scene_summary_pending",
+                    duration=5,
+                    narration="A punchy takeaway is next.",
+                    takeaways=["Almost ready"],
+                ),
+            ],
+        )
     return Lesson(
         lesson_id=row.id,
         title=row.title,

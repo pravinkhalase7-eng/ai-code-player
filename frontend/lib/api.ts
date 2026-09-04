@@ -18,10 +18,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export function createLesson(topic: string, language = "java", level = "beginner") {
+export function createLesson(
+  topic: string,
+  language = "java",
+  level = "beginner",
+  format: "lesson" | "reel" = "lesson",
+) {
   return request<{ lesson_id: string; status: string; job_id: string }>(
     "/api/v1/tutor/lesson",
-    { method: "POST", body: JSON.stringify({ topic, language, level }) },
+    { method: "POST", body: JSON.stringify({ topic, language, level, format }) },
   );
 }
 

@@ -46,25 +46,41 @@ def ensure_user(db: Session, user_id: str | None) -> str:
     return uid
 
 
-def queue_lesson(db: Session, topic: str, language: str, level: str, user_id: str | None) -> tuple[str, str]:
+def queue_lesson(
+    db: Session,
+    topic: str,
+    language: str,
+    level: str,
+    user_id: str | None,
+    format: str = "lesson",
+) -> tuple[str, str]:
     uid = ensure_user(db, user_id)
     lesson_id = new_id("les_")
+    fmt = "reel" if format == "reel" else "lesson"
+    title = f"30s: {topic.title()}" if fmt == "reel" else topic.title()
     row = LessonRow(
         id=lesson_id,
         user_id=uid,
-        title=topic.title(),
+        title=title,
         language=language.lower(),
         level=level,
         topic=topic,
         status="queued",
-        lesson_json={},
+        lesson_json={"format": fmt},
     )
     db.add(row)
     db.commit()
     job = create_job(
         db,
         "lesson_generation",
-        {"lesson_id": lesson_id, "topic": topic, "language": language, "level": level, "user_id": uid},
+        {
+            "lesson_id": lesson_id,
+            "topic": topic,
+            "language": language,
+            "level": level,
+            "format": fmt,
+            "user_id": uid,
+        },
     )
     enqueue(job.id, "lesson_generation")
     return lesson_id, job.id
@@ -219,7 +235,7 @@ def schedule_google_audio(lesson_id: str) -> None:
     threading.Thread(target=_run, daemon=True, name=f"google-tts-{lesson_id[-8:]}").start()
 
 
-def build_lesson(db: Session, lesson_id: str, topic: str, language: str, level: str) -> Lesson:
+def build_lesson(db: Session, lesson_id: str, topic: str, language: str, level: str, format: str = "lesson") -> Lesson:
     row = db.get(LessonRow, lesson_id)
     if row is None:
         raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
@@ -227,7 +243,7 @@ def build_lesson(db: Session, lesson_id: str, topic: str, language: str, level: 
     db.commit()
     warnings: list[str] = []
 
-    plan = plan_lesson(topic, language, level)
+    plan = plan_lesson(topic, language, level, format=format)
     lesson = generate_structured_lesson(plan, lesson_id)
     lesson = _stamp_language(lesson)
 
@@ -331,6 +347,7 @@ def list_recent_lessons(db: Session, user_id: str) -> list[dict[str, Any]]:
                 "completion_percent": percent,
                 "scene_index": scene_index,
                 "topic": row.topic,
+                "format": (row.lesson_json or {}).get("format") or "lesson",
             }
         )
     return results

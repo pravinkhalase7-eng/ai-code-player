@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.lesson import EvaluationResult, ExecutionStep, Lesson, LessonLevel
+from app.schemas.lesson import EvaluationResult, ExecutionStep, Lesson, LessonFormat, LessonLevel
 from app.services.visualizer import normalize_language
 
 
@@ -11,6 +11,7 @@ class LessonCreateRequest(BaseModel):
     topic: str = Field(min_length=1, max_length=200)
     language: str = Field(default="java", min_length=1, max_length=32)
     level: LessonLevel = LessonLevel.beginner
+    format: LessonFormat = LessonFormat.lesson
     user_id: str | None = None
 
     @field_validator("language")

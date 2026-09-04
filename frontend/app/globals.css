@@ -33,3 +33,9 @@ body {
   border-radius: 4px;
   outline: 1px solid rgba(251, 191, 36, 0.7);
 }
+
+.reel-frame {
+  background:
+    radial-gradient(800px 400px at 50% -10%, rgba(251, 191, 36, 0.18), transparent 55%),
+    #09090b;
+}

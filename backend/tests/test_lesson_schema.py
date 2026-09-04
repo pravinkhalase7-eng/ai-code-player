@@ -103,6 +103,41 @@ def test_lesson_schema_accepts_for_loop_lesson() -> None:
     assert {scene.type for scene in lesson.scenes} >= {"intro", "code", "quiz"}
 
 
+def test_reel_schema_does_not_require_quiz() -> None:
+    payload = {
+        "lesson_id": "java-for-loop-reel",
+        "title": "30s: Java For Loop",
+        "language": "java",
+        "level": "beginner",
+        "format": "reel",
+        "topic": "for loop",
+        "objectives": ["Hook the concept", "Show a tiny example"],
+        "scenes": [
+            {"id": "hook", "type": "intro", "duration": 6, "narration": "Stop scrolling. Java for loops in 30 seconds."},
+            {
+                "id": "code",
+                "type": "code",
+                "duration": 12,
+                "language": "java",
+                "code": JAVA_FOR,
+                "narration": "i starts at zero, runs while i is less than five, then i plus plus.",
+            },
+            {
+                "id": "run",
+                "type": "execution",
+                "duration": 7,
+                "code": JAVA_FOR,
+                "narration": "Watch it print zero through four.",
+            },
+            {"id": "end", "type": "summary", "duration": 5, "narration": "Init, condition, increment. Save this.", "takeaways": ["i++ after the body"]},
+        ],
+    }
+    lesson = Lesson.model_validate(payload)
+    assert lesson.format.value == "reel"
+    assert {scene.type for scene in lesson.scenes} >= {"intro", "code", "summary"}
+    assert all(scene.type != "quiz" for scene in lesson.scenes)
+
+
 def test_lesson_schema_rejects_missing_scenes() -> None:
     payload = valid_lesson_payload()
     payload["scenes"] = [scene for scene in payload["scenes"] if scene["type"] != "quiz"]
@@ -153,6 +188,18 @@ def test_lesson_draft_converts_to_strict_lesson() -> None:
     lesson = lesson_from_draft(draft)
     assert isinstance(lesson, Lesson)
     assert {scene.type for scene in lesson.scenes} >= {"intro", "code", "quiz"}
+
+
+def test_fit_reel_durations_total_about_30_seconds() -> None:
+    from app.agents.orchestrator import _fit_reel_durations
+
+    payload = valid_lesson_payload()
+    payload["format"] = "reel"
+    payload["scenes"] = [scene for scene in payload["scenes"] if scene["type"] != "quiz"]
+    lesson = Lesson.model_validate(payload)
+    fitted = _fit_reel_durations(lesson)
+    total = sum(scene.duration for scene in fitted.scenes)
+    assert 28.0 <= total <= 32.0
 
 
 def test_tts_hash_is_stable() -> None:

@@ -1,3 +1,4 @@
+export type LessonFormat = "lesson" | "reel";
 export type LessonLevel = "beginner" | "intermediate" | "advanced";
 export type SceneType =
   | "intro"
@@ -85,6 +86,7 @@ export type Lesson = {
   title: string;
   language: string;
   level: LessonLevel;
+  format?: LessonFormat;
   topic: string;
   objectives: string[];
   concepts?: string[];
@@ -96,6 +98,7 @@ export type LessonSummary = {
   title: string;
   language: string;
   level: string;
+  format?: LessonFormat;
   status: string;
   completion_percent: number;
   scene_index?: number;
