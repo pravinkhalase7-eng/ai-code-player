@@ -182,11 +182,6 @@ pipeline {
       steps {
         sh '''
           set -e
-          set -a
-          # shellcheck disable=SC1091
-          . ./.env.deploy
-          set +a
-
           echo "Building API image..."
           docker build -t ${API_IMAGE} -t ${API_IMAGE_LATEST} ./backend
 
@@ -213,7 +208,6 @@ pipeline {
             -e TTS_PROVIDER=browser \
             -e TTS_FALLBACK_PROVIDER=browser \
             -e GEMINI_API_KEY= \
-            -v "$WORKSPACE/backend/scripts/jenkins_smoke.py:/app/scripts/jenkins_smoke.py:ro" \
             ${API_IMAGE} \
             python /app/scripts/jenkins_smoke.py
         '''
@@ -228,10 +222,12 @@ pipeline {
         sh '''
           set -e
           cp -f .env.deploy .env
+          set +x
           set -a
           # shellcheck disable=SC1091
           . ./.env
           set +a
+          set -x
 
           export API_HOST_PORT="${API_HOST_PORT:-8010}"
           export WEB_HOST_PORT="${WEB_HOST_PORT:-3010}"

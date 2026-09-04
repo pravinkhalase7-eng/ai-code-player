@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Film, ImageIcon, Sparkles, TerminalSquare, Volume2 } from "lucide-react";
+import { Download, ImageIcon, Pencil, Sparkles, TerminalSquare, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CodeWorkbench } from "@/components/editor/CodeWorkbench";
 import { QuizCard } from "@/components/player/QuizCard";
@@ -64,11 +64,12 @@ export function LessonPlayer({
   const [exporting, setExporting] = useState(false);
   const [exportLabel, setExportLabel] = useState("");
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
-  const [scriptOpen, setScriptOpen] = useState(false);
-  const [draftCode, setDraftCode] = useState("");
-  const [draftLines, setDraftLines] = useState<ScriptLine[]>([]);
+  const [reelReview, setReelReview] = useState(() => lesson.format === "reel");
+  const [draftCode, setDraftCode] = useState(() => exampleCode);
+  const [draftLines, setDraftLines] = useState<ScriptLine[]>(() => scriptLinesFrom(lesson));
   const [scriptBusy, setScriptBusy] = useState("");
   const [scriptError, setScriptError] = useState("");
+  const pendingPlay = useRef(false);
   const indexRef = useRef(index);
   const playingRef = useRef(playing);
   indexRef.current = index;
@@ -177,6 +178,14 @@ export function LessonPlayer({
     setPlaying(true);
     void playClip(scene, true);
   }
+
+  useEffect(() => {
+    if (reelReview || !pendingPlay.current) return;
+    pendingPlay.current = false;
+    setNeedsGesture(false);
+    setPlaying(true);
+    void playClip(scene, true);
+  }, [reelReview, scene]);
 
   function goTo(nextIndex: number, startAt = 0) {
     const bounded = Math.min(scenes.length - 1, Math.max(0, nextIndex));
@@ -413,15 +422,46 @@ export function LessonPlayer({
     window.speechSynthesis?.cancel();
     setScriptError("");
     setDraftCode(code || exampleCode);
-    setDraftLines(
-      lesson.scenes.map((item) => ({
-        id: item.id,
-        type: item.type,
-        narration: item.narration,
-        takeaways: item.takeaways,
-      })),
-    );
-    setScriptOpen(true);
+    setDraftLines(scriptLinesFrom(lesson));
+    setReelReview(true);
+  }
+
+  function scriptIsDirty() {
+    if ((draftCode || "").trim() !== (exampleCode || "").trim()) return true;
+    return lesson.scenes.some((item) => {
+      const line = draftLines.find((entry) => entry.id === item.id);
+      return (line?.narration ?? "") !== (item.narration ?? "");
+    });
+  }
+
+  async function persistDraft() {
+    const payload = await saveReelScript(lesson.lesson_id, {
+      code: draftCode,
+      scenes: draftLines,
+      rewrite: false,
+    });
+    onLessonChange?.(payload.lesson);
+    setThumbUrl(payload.lesson.thumbnail_url || "");
+    setDraftCode(primaryCode(payload.lesson) || draftCode);
+    setDraftLines(scriptLinesFrom(payload.lesson));
+    return payload.lesson;
+  }
+
+  async function playReviewedShort() {
+    setScriptError("");
+    try {
+      if (scriptIsDirty()) {
+        setScriptBusy("save");
+        await persistDraft();
+      }
+      pendingPlay.current = true;
+      setIndex(0);
+      setReelReview(false);
+    } catch (err) {
+      setScriptError(err instanceof Error ? err.message : "Could not save the script");
+    } finally {
+      setScriptBusy("");
+    }
   }
 
   async function rewriteFromProgram() {
@@ -436,14 +476,7 @@ export function LessonPlayer({
       onLessonChange?.(payload.lesson);
       setThumbUrl(payload.lesson.thumbnail_url || "");
       setDraftCode(primaryCode(payload.lesson) || draftCode);
-      setDraftLines(
-        payload.lesson.scenes.map((item) => ({
-          id: item.id,
-          type: item.type,
-          narration: item.narration,
-          takeaways: item.takeaways,
-        })),
-      );
+      setDraftLines(scriptLinesFrom(payload.lesson));
     } catch (err) {
       setScriptError(err instanceof Error ? err.message : "Could not rewrite the script from that program");
     } finally {
@@ -455,15 +488,9 @@ export function LessonPlayer({
     setScriptBusy("save");
     setScriptError("");
     try {
-      const payload = await saveReelScript(lesson.lesson_id, {
-        code: draftCode,
-        scenes: draftLines,
-        rewrite: false,
-      });
-      onLessonChange?.(payload.lesson);
-      setThumbUrl(payload.lesson.thumbnail_url || payload.lesson.thumbnail_url || "");
-      setScriptOpen(false);
-      await recordReelVideo(payload.lesson);
+      const next = scriptIsDirty() ? await persistDraft() : lesson;
+      setReelReview(false);
+      await recordReelVideo(next);
     } catch (err) {
       setScriptError(err instanceof Error ? err.message : "Could not save the script");
       setScriptBusy("");
@@ -513,9 +540,11 @@ export function LessonPlayer({
   return (
     <div
       className={cn(
-        isReel
-          ? "flex h-[calc(100dvh-3.25rem)] flex-col gap-2 overflow-hidden"
-          : "grid min-h-[calc(100vh-6rem)] grid-rows-[auto_1fr_auto_auto] gap-4",
+        isReel && reelReview
+          ? "flex min-h-[calc(100dvh-3.25rem)] flex-col gap-3"
+          : isReel
+            ? "flex h-[calc(100dvh-3.25rem)] flex-col gap-2 overflow-hidden"
+            : "grid min-h-[calc(100vh-6rem)] grid-rows-[auto_1fr_auto_auto] gap-4",
       )}
     >
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -530,11 +559,13 @@ export function LessonPlayer({
         <div className="flex flex-wrap items-center gap-2">
           {isReel ? (
             <>
+              {!reelReview ? (
+                <Button size="sm" variant="outline" onClick={openScriptStudio} disabled={exporting || Boolean(scriptBusy)}>
+                  <Pencil className="h-4 w-4" /> Edit script
+                </Button>
+              ) : null}
               <Button size="sm" variant="outline" onClick={() => void makeThumbnail()} disabled={thumbBusy}>
                 <ImageIcon className="h-4 w-4" /> {thumbBusy ? "Thumbnail…" : "Thumbnail"}
-              </Button>
-              <Button size="sm" onClick={openScriptStudio} disabled={exporting || Boolean(scriptBusy)}>
-                <Film className="h-4 w-4" /> {exporting ? "Generating…" : "Generate video"}
               </Button>
               {videoBlob ? (
                 <Button
@@ -557,6 +588,23 @@ export function LessonPlayer({
         <p className="-mt-2 text-xs text-zinc-400">{exportLabel}</p>
       ) : null}
 
+      {isReel && reelReview ? (
+        <ReelScriptStudio
+          lesson={lesson}
+          code={draftCode}
+          lines={draftLines}
+          busy={scriptBusy}
+          error={scriptError}
+          onCodeChange={setDraftCode}
+          onNarrationChange={(id, narration) =>
+            setDraftLines((current) => current.map((line) => (line.id === id ? { ...line, narration } : line)))
+          }
+          onRewrite={() => void rewriteFromProgram()}
+          onPlay={() => void playReviewedShort()}
+          onRecord={() => void confirmScriptAndRecord()}
+        />
+      ) : (
+        <>
       <PlayerTransport
         scenes={scenes}
         index={index}
@@ -744,27 +792,20 @@ export function LessonPlayer({
           ) : null}
         </>
       )}
+        </>
+      )}
       <audio ref={audioRef} className="sr-only" preload="auto" playsInline />
-      {scriptOpen ? (
-        <ReelScriptStudio
-          lesson={lesson}
-          code={draftCode}
-          lines={draftLines}
-          busy={scriptBusy}
-          error={scriptError}
-          onCodeChange={setDraftCode}
-          onNarrationChange={(id, narration) =>
-            setDraftLines((current) => current.map((line) => (line.id === id ? { ...line, narration } : line)))
-          }
-          onRewrite={() => void rewriteFromProgram()}
-          onConfirm={() => void confirmScriptAndRecord()}
-          onClose={() => {
-            if (!scriptBusy) setScriptOpen(false);
-          }}
-        />
-      ) : null}
     </div>
   );
+}
+
+function scriptLinesFrom(lesson: Lesson): ScriptLine[] {
+  return lesson.scenes.map((item) => ({
+    id: item.id,
+    type: item.type,
+    narration: item.narration,
+    takeaways: item.takeaways,
+  }));
 }
 
 function primaryCode(lesson: Lesson): string {

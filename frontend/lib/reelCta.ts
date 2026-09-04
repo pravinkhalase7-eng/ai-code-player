@@ -1,7 +1,7 @@
 import type { Lesson, LessonScene } from "@/types/lesson";
 import { displayTopic } from "@/lib/reelHeadlines";
 
-export const REEL_HANDLE = "@byte.codes";
+export const REEL_HANDLE = "@techshalabypavi";
 
 export function isPosterScene(type: string | undefined): boolean {
   return type === "intro" || type === "summary";
@@ -25,6 +25,6 @@ export function reelCta(lesson: Lesson, scene?: LessonScene) {
     save: "Save",
     comment: commentPrompt(topic),
     endLine: takeaway || `Save this ${topic} trick`,
-    endAction: "Follow Byte for daily shorts",
+    endAction: "Follow @techshalabypavi for daily shorts",
   };
 }

@@ -606,10 +606,3 @@ def rewrite_reel_script(lesson: Lesson, code: str) -> ReelScriptDraft:
     if not ordered:
         return draft
     return ReelScriptDraft(scenes=ordered)
-    try:
-        return generate_text(
-            "You are a friendly coding tutor. Answer in 4 sentences or fewer.",
-            message,
-        )
-    except Exception:
-        return "I ran into a problem answering that. Try asking about a specific line of the code."
