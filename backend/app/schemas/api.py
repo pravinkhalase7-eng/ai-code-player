@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.lesson import EvaluationResult, ExecutionStep, Lesson, LessonFormat, LessonLevel
+from app.schemas.lesson import EvaluationResult, ExecutionStep, Lesson, LessonFormat, LessonLevel, ReelSceneScript
 from app.services.locale import normalize_spoken_language
 from app.services.visualizer import normalize_language
 
@@ -147,6 +147,12 @@ class LessonResponse(BaseModel):
     lesson: Lesson
     status: str
     warnings: list[str] = Field(default_factory=list)
+
+
+class ReelScriptRequest(BaseModel):
+    code: str | None = Field(default=None, max_length=50_000)
+    scenes: list[ReelSceneScript] = Field(default_factory=list)
+    rewrite: bool = False
 
 
 def new_id(prefix: str = "") -> str:

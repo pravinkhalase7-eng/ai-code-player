@@ -1,3 +1,4 @@
+import { highlightForSpeech } from "@/lib/codeFocus";
 import type { HighlightRange, LessonScene, TutorExpression } from "@/types/lesson";
 
 export type SyncCue = {
@@ -11,7 +12,7 @@ export type SyncCue = {
 
 export function splitSentences(text: string): string[] {
   return text
-    .split(/(?<=[.!?])\s+|\n+/)
+    .split(/(?<=[.!?।])\s+|\n+/)
     .map((part) => part.trim())
     .filter(Boolean);
 }
@@ -29,26 +30,17 @@ function clipDuration(scene: LessonScene, audioDuration?: number): number {
   return estimatedSpeechDuration(scene.narration || "", scene.duration || 8);
 }
 
-function findHighlight(ranges: HighlightRange[], key?: string | null): HighlightRange | null {
-  if (!key || !ranges.length) return null;
-  const needle = key.toLowerCase();
-  return (
-    ranges.find((item) => item.label.toLowerCase() === needle) ||
-    ranges.find((item) => needle.includes(item.label.toLowerCase()) || item.label.toLowerCase().includes(needle)) ||
-    ranges.find((item) =>
-      item.label
-        .toLowerCase()
-        .split(/\W+/)
-        .filter((word) => word.length > 3)
-        .some((word) => needle.includes(word)),
-    ) ||
-    null
-  );
+function sceneHighlight(scene: LessonScene, speech?: string | null, key?: string | null): HighlightRange | null {
+  if (scene.type !== "code" && scene.type !== "execution") return null;
+  const code = scene.code || "";
+  const ranges = scene.highlight_ranges ?? [];
+  const spoken = [key, speech].filter(Boolean).join(" ");
+  return highlightForSpeech(code, ranges, spoken);
 }
 
 export function buildCues(scene: LessonScene, audioDuration?: number): SyncCue[] {
   const duration = clipDuration(scene, audioDuration);
-  const highlights = scene.highlight_ranges ?? [];
+  const code = scene.code || "";
 
   if (scene.type === "execution" && scene.iterations?.length) {
     const slice = duration / scene.iterations.length;
@@ -56,7 +48,7 @@ export function buildCues(scene: LessonScene, audioDuration?: number): SyncCue[]
       start: index * slice,
       end: (index + 1) * slice,
       text: step.description,
-      highlight: {
+      highlight: highlightForSpeech(code, scene.highlight_ranges ?? [], step.description) || {
         start_line: step.line,
         end_line: step.line,
         start_col: 0,
@@ -74,7 +66,7 @@ export function buildCues(scene: LessonScene, audioDuration?: number): SyncCue[]
       start: segment.start * scale,
       end: segment.end * scale,
       text: segment.text,
-      highlight: findHighlight(highlights, segment.highlight) || findHighlight(highlights, segment.text),
+      highlight: sceneHighlight(scene, segment.text, segment.highlight),
       expression: segment.expression,
     }));
   }
@@ -86,7 +78,7 @@ export function buildCues(scene: LessonScene, audioDuration?: number): SyncCue[]
         start: 0,
         end: duration,
         text: scene.narration || "",
-        highlight: highlights[0] ?? null,
+        highlight: sceneHighlight(scene, scene.narration || ""),
       },
     ];
   }
@@ -98,16 +90,11 @@ export function buildCues(scene: LessonScene, audioDuration?: number): SyncCue[]
     const span = duration * (weights[index] / total);
     const start = cursor;
     cursor += span;
-    const matched = findHighlight(highlights, text);
-    const sequential =
-      scene.type === "code" && highlights.length
-        ? highlights[Math.min(index, highlights.length - 1)]
-        : null;
     return {
       start,
       end: index === sentences.length - 1 ? duration + 0.05 : cursor,
       text,
-      highlight: matched || sequential,
+      highlight: sceneHighlight(scene, text),
     };
   });
 }

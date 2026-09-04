@@ -71,7 +71,7 @@ export function Dashboard() {
         </h1>
         <p className="mt-4 max-w-2xl text-lg text-zinc-400">
           Ask for a concept. Byte generates a lesson, types the code, runs it in a sandbox, and walks through every iteration.
-          Or cut a 30-second catchy short you can watch like a reel.
+          Or cut a catchy short you can watch like a reel.
         </p>
       </div>
 
@@ -127,7 +127,7 @@ export function Dashboard() {
           {(
             [
               { id: "lesson" as const, label: "Full lesson", hint: "Walkthrough, execution, quiz" },
-              { id: "reel" as const, label: "30s Short", hint: "Catchy hook, code, punchline" },
+              { id: "reel" as const, label: "Short", hint: "Catchy hook, code, punchline" },
             ] as const
           ).map((item) => (
             <button
@@ -188,7 +188,7 @@ export function Dashboard() {
                       <div className="relative h-28 w-full overflow-hidden bg-zinc-900">
                         <img src={lesson.thumbnail_url} alt="" className="h-full w-full object-cover" />
                         <span className="absolute left-3 top-3 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-950">
-                          30s
+                          Short
                         </span>
                       </div>
                     ) : null}
@@ -196,7 +196,7 @@ export function Dashboard() {
                     <div className="flex items-center justify-between gap-3">
                       <p className="font-semibold text-white">{lesson.format === "reel" ? lesson.topic : lesson.title}</p>
                       <span className="text-xs uppercase text-amber-200">
-                        {lesson.format === "reel" ? "30s short" : lesson.status === "ready" ? lesson.language : lesson.status}
+                        {lesson.format === "reel" ? "short" : lesson.status === "ready" ? lesson.language : lesson.status}
                         {lesson.spoken_language && lesson.spoken_language !== "en"
                           ? ` · ${lesson.spoken_language}`
                           : ""}

@@ -10,10 +10,12 @@ import { PlayerTransport } from "@/components/player/PlayerTransport";
 import { Terminal } from "@/components/player/Terminal";
 import { TutorAvatar } from "@/components/tutor/TutorAvatar";
 import { ReelStage } from "@/components/player/ReelStage";
-import { answerQuiz, executeCode, explainRunError, generateThumbnail, saveProgress, sendChat } from "@/lib/api";
+import { ReelScriptStudio, type ScriptLine } from "@/components/player/ReelScriptStudio";
+import { answerQuiz, executeCode, explainRunError, generateThumbnail, saveProgress, saveReelScript, sendChat } from "@/lib/api";
 import { downloadBlob, exportReelVideo, fileExtension } from "@/lib/reelExport";
 import { defaultCode, runCommand, sourceFilename } from "@/lib/language";
 import { audioSrc, cn } from "@/lib/utils";
+import { firstMeaningfulHighlight } from "@/lib/codeFocus";
 import { buildCues, cueAt } from "@/lib/narrationSync";
 import { SPOKEN_LANGUAGES } from "@/lib/spokenLanguage";
 import type { ExecutionStep, HighlightRange, Lesson, LessonScene, RunHelp, TutorExpression } from "@/types/lesson";
@@ -22,10 +24,12 @@ export function LessonPlayer({
   lesson,
   warnings,
   initialSceneIndex = 0,
+  onLessonChange,
 }: {
   lesson: Lesson;
   warnings: string[];
   initialSceneIndex?: number;
+  onLessonChange?: (lesson: Lesson) => void;
 }) {
   const scenes = lesson.scenes;
   const [index, setIndex] = useState(() =>
@@ -60,6 +64,11 @@ export function LessonPlayer({
   const [exporting, setExporting] = useState(false);
   const [exportLabel, setExportLabel] = useState("");
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const [draftCode, setDraftCode] = useState("");
+  const [draftLines, setDraftLines] = useState<ScriptLine[]>([]);
+  const [scriptBusy, setScriptBusy] = useState("");
+  const [scriptError, setScriptError] = useState("");
   const indexRef = useRef(index);
   const playingRef = useRef(playing);
   indexRef.current = index;
@@ -75,7 +84,7 @@ export function LessonPlayer({
     setCode(scene?.code?.trim() ? scene.code : exampleCode);
     setCurrentTime(0);
     if (scene?.type === "code") {
-      setHighlight(scene.highlight_ranges?.[0] ?? null);
+      setHighlight(firstMeaningfulHighlight(scene.code || exampleCode, scene.highlight_ranges ?? []) ?? null);
     } else if (scene?.type === "execution") {
       setHighlight(
         scene.iterations?.[0]
@@ -258,7 +267,11 @@ export function LessonPlayer({
       const cue = cueAt(cues, time);
       if (cue) {
         setCaption(cue.text);
-        if (cue.highlight) setHighlight(cue.highlight);
+        if (cue.highlight) {
+          setHighlight(cue.highlight);
+        } else if (scene.type !== "code") {
+          setHighlight(null);
+        }
         if (cue.expression) setExpression(cue.expression);
         if (!manualStepping && typeof cue.stepIndex === "number") setStepIndex(cue.stepIndex);
       }
@@ -394,24 +407,100 @@ export function LessonPlayer({
     }
   }
 
-  async function makeReelVideo() {
+  function openScriptStudio() {
+    setPlaying(false);
+    audioRef.current?.pause();
+    window.speechSynthesis?.cancel();
+    setScriptError("");
+    setDraftCode(code || exampleCode);
+    setDraftLines(
+      lesson.scenes.map((item) => ({
+        id: item.id,
+        type: item.type,
+        narration: item.narration,
+        takeaways: item.takeaways,
+      })),
+    );
+    setScriptOpen(true);
+  }
+
+  async function rewriteFromProgram() {
+    setScriptBusy("rewrite");
+    setScriptError("");
+    try {
+      const payload = await saveReelScript(lesson.lesson_id, {
+        code: draftCode,
+        scenes: draftLines,
+        rewrite: true,
+      });
+      onLessonChange?.(payload.lesson);
+      setThumbUrl(payload.lesson.thumbnail_url || "");
+      setDraftCode(primaryCode(payload.lesson) || draftCode);
+      setDraftLines(
+        payload.lesson.scenes.map((item) => ({
+          id: item.id,
+          type: item.type,
+          narration: item.narration,
+          takeaways: item.takeaways,
+        })),
+      );
+    } catch (err) {
+      setScriptError(err instanceof Error ? err.message : "Could not rewrite the script from that program");
+    } finally {
+      setScriptBusy("");
+    }
+  }
+
+  async function confirmScriptAndRecord() {
+    setScriptBusy("save");
+    setScriptError("");
+    try {
+      const payload = await saveReelScript(lesson.lesson_id, {
+        code: draftCode,
+        scenes: draftLines,
+        rewrite: false,
+      });
+      onLessonChange?.(payload.lesson);
+      setThumbUrl(payload.lesson.thumbnail_url || payload.lesson.thumbnail_url || "");
+      setScriptOpen(false);
+      await recordReelVideo(payload.lesson);
+    } catch (err) {
+      setScriptError(err instanceof Error ? err.message : "Could not save the script");
+      setScriptBusy("");
+    }
+  }
+
+  async function recordReelVideo(source: Lesson) {
+    setScriptBusy("record");
     setExporting(true);
     setExportLabel("Recording 9:16 reel…");
     setPlaying(false);
     audioRef.current?.pause();
     window.speechSynthesis?.cancel();
     try {
+      let poster = thumbUrl || source.thumbnail_url || "";
+      if (!poster) {
+        setExportLabel("Making thumbnail…");
+        try {
+          const payload = await generateThumbnail(source.lesson_id);
+          poster = payload.lesson.thumbnail_url || "";
+          setThumbUrl(poster);
+        } catch {
+          poster = "";
+        }
+      }
       const blob = await exportReelVideo(
-        { ...lesson, thumbnail_url: thumbUrl || lesson.thumbnail_url },
+        { ...source, thumbnail_url: poster || source.thumbnail_url },
         (progress) => setExportLabel(`Scene ${progress.scene}/${progress.total} · ${progress.label}`),
       );
       setVideoBlob(blob);
       setExportLabel("Reel ready — download it");
-      downloadBlob(blob, `${safeReelName(lesson.topic)}.${fileExtension(blob)}`);
+      downloadBlob(blob, `${safeReelName(source.topic)}.${fileExtension(blob)}`);
     } catch (err) {
       setExportLabel(err instanceof Error ? err.message : "Could not generate the reel video");
     } finally {
       setExporting(false);
+      setScriptBusy("");
     }
   }
 
@@ -431,12 +520,12 @@ export function LessonPlayer({
     >
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-amber-200/80">
+          <p className="text-sm uppercase tracking-[0.25em] text-amber-200/80">
             {isReel
               ? `${spokenLabel} · ${lesson.language} · ${lesson.topic}`
               : `Scene ${index + 1} of ${scenes.length} · ${scene.type}`}
           </p>
-          <h1 className={cn("font-semibold text-white", isReel ? "text-xl" : "text-2xl")}>{isReel ? lesson.topic : lesson.title}</h1>
+          <h1 className={cn("font-semibold text-white", isReel ? "text-2xl leading-7" : "text-2xl")}>{isReel ? lesson.topic : lesson.title}</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {isReel ? (
@@ -444,7 +533,7 @@ export function LessonPlayer({
               <Button size="sm" variant="outline" onClick={() => void makeThumbnail()} disabled={thumbBusy}>
                 <ImageIcon className="h-4 w-4" /> {thumbBusy ? "Thumbnail…" : "Thumbnail"}
               </Button>
-              <Button size="sm" onClick={() => void makeReelVideo()} disabled={exporting}>
+              <Button size="sm" onClick={openScriptStudio} disabled={exporting || Boolean(scriptBusy)}>
                 <Film className="h-4 w-4" /> {exporting ? "Generating…" : "Generate video"}
               </Button>
               {videoBlob ? (
@@ -542,6 +631,8 @@ export function LessonPlayer({
             terminalLines={terminalLines}
             runError={runError}
             iterations={iterations}
+            sceneIndex={index}
+            sceneCount={scenes.length}
             stepIndex={stepIndex}
           />
         </div>
@@ -654,6 +745,24 @@ export function LessonPlayer({
         </>
       )}
       <audio ref={audioRef} className="sr-only" preload="auto" playsInline />
+      {scriptOpen ? (
+        <ReelScriptStudio
+          lesson={lesson}
+          code={draftCode}
+          lines={draftLines}
+          busy={scriptBusy}
+          error={scriptError}
+          onCodeChange={setDraftCode}
+          onNarrationChange={(id, narration) =>
+            setDraftLines((current) => current.map((line) => (line.id === id ? { ...line, narration } : line)))
+          }
+          onRewrite={() => void rewriteFromProgram()}
+          onConfirm={() => void confirmScriptAndRecord()}
+          onClose={() => {
+            if (!scriptBusy) setScriptOpen(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

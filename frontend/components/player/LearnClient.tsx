@@ -15,7 +15,7 @@ const STATUS_COPY: Record<string, string> = {
 };
 
 const REEL_STATUS_COPY: Record<string, string> = {
-  queued: "Byte is lining up a 30-second short…",
+  queued: "Byte is lining up a short…",
   running: "Byte is cutting a catchy reel and recording the voice…",
 };
 
@@ -142,7 +142,7 @@ export function LearnClient({ lessonId }: { lessonId: string }) {
         <p className="text-zinc-300">
           {(lesson?.format === "reel" ? REEL_STATUS_COPY[status] : STATUS_COPY[status]) ??
             (lesson?.format === "reel"
-              ? "Byte is cutting your 30-second short…"
+              ? "Byte is cutting your short…"
               : "Byte is preparing your visual lesson…")}
         </p>
         {lesson?.spoken_language && lesson.spoken_language !== "en" ? (
@@ -168,5 +168,5 @@ export function LearnClient({ lessonId }: { lessonId: string }) {
     );
   }
 
-  return <LessonPlayer lesson={lesson} warnings={warnings} initialSceneIndex={progressIndex} />;
+  return <LessonPlayer lesson={lesson} warnings={warnings} initialSceneIndex={progressIndex} onLessonChange={setLesson} />;
 }

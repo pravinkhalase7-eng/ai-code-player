@@ -4,11 +4,19 @@ import logging
 import re
 
 from app.config import settings
-from app.schemas.lesson import ChatReply, EvaluationResult, Lesson, LessonDraft, LessonFormat, TranslatedLines, TutorPlan, lesson_from_draft
+from app.schemas.lesson import ChatReply, EvaluationResult, Lesson, LessonDraft, LessonFormat, ReelScriptDraft, TranslatedLines, TutorPlan, lesson_from_draft
 from app.services.gemini_client import generate_text, structured_generate
-from app.services.locale import needs_localization, spoken_generation_rules, spoken_locale, uses_spoken_script
+from app.services.locale import needs_localization, spoken_generation_rules, spoken_locale, strip_duration_copy, uses_spoken_script
 
 logger = logging.getLogger(__name__)
+
+CODE_TEACHING_RULES = """
+When code is on screen, teach THAT code — not a textbook definition.
+For every highlighted line: quote the actual tokens, say what this example does, then say why that line exists.
+Wrong: "A for loop repeats work while a condition stays true."
+Right: "`int i = 0` starts the counter at 0. `i < 5` is the stop test — when i becomes 5 the loop ends. `i++` bumps i after the body so it is not infinite."
+Never talk about 'the concept' in the abstract if the snippet is visible. Point at the line.
+""".strip()
 
 TUTOR_INSTRUCTION = """
 You are the Tutor Agent for an AI Coding Tutor platform.
@@ -22,7 +30,10 @@ If they ask for a for loop, plan initialization, condition, increment, body, and
 Never claim that code ran. Never invent terminal output.
 """.strip()
 
-PLANNER_INSTRUCTION = """
+PLANNER_INSTRUCTION = (
+    CODE_TEACHING_RULES
+    + """
+
 You are the Lesson Planner Agent.
 Create a complete structured lesson for an interactive visual coding tutor that TEACHES THE REQUESTED TOPIC IN FULL.
 The lesson MUST include scenes of types: intro, concept, code, execution, terminal, quiz, summary — in that order.
@@ -35,9 +46,10 @@ Hard rules:
 - Code scene MUST include a complete, runnable example of THIS topic.
   Java: public class Main in Main.java. Python: a complete main.py. JavaScript: a complete main.js.
   Never leave the program empty.
-- Code narration walks through the example line by line (what each highlighted piece does).
+- Code narration walks through THIS example line by line: quote the tokens, say what happens, say why the line is there.
+  Do not give a generic definition of the topic while the editor is showing code.
 - Include highlight_ranges that point at the important lines of that example.
-- Include narration segments that sync those highlights.
+- Include narration segments that sync those highlights. Each segment.text must mention the code it highlights.
 - Execution and terminal scenes use the same example code.
 - Quiz must test THIS topic (predict_output of the example when possible).
 - Summary restates the concept and 3-5 takeaways.
@@ -85,10 +97,14 @@ public class Main {
             System.out.println(evensDoubled);
     }
 }
-""".strip()
+"""
+).strip()
 
-REEL_PLANNER_INSTRUCTION = """
-You are the Lesson Planner Agent for a 30-SECOND CATCHY CODING REEL (TikTok / Instagram Reels / YouTube Shorts).
+REEL_PLANNER_INSTRUCTION = (
+    CODE_TEACHING_RULES
+    + """
+
+You are the Lesson Planner Agent for a catchy coding reel (TikTok / Instagram Reels / YouTube Shorts).
 Create a fast, hooky visual short. Total spoken time across ALL scenes MUST be about 30 seconds (70-90 words total).
 
 Required scenes IN THIS ORDER: intro, code, execution, summary.
@@ -96,17 +112,22 @@ Do NOT include concept or quiz scenes.
 
 Hard rules:
 - Intro (6-8s): Hook in the first sentence. Pattern interrupt. Name the concept. Energetic, spoken to camera.
-- Code (10-12s): Tiny complete runnable example of THIS topic. Narrate the one trick, not every line. 1-3 highlight_ranges.
-- Execution (6-8s): Same example. Say what the output proves. expected_output must be an empty list.
-- Summary (4-6s): One punchy takeaway. 2-3 short takeaways max. End with save-this energy.
+- Code (10-12s): Tiny complete runnable example of THIS topic. 1-3 highlight_ranges.
+  Highlight ONLY the teaching tokens (callback, Promise/.then, async/await). Never highlight braces, class/main wrappers, imports, or empty lines.
+  Narrate the actual lines: quote the code, say what it does in this snippet, and why it's needed.
+  Do not define the topic in the abstract. The one trick must be visible in the code.
+- Execution (6-8s): Same example. Say what THIS output proves about those lines. expected_output must be an empty list.
+- Summary (4-6s): One punchy takeaway. 2-3 short takeaways max. End by asking them to follow, save, or comment which option they would use.
 - Spoken style: short sentences, no filler ("so", "basically", "in this video we will"). Catchy, not a lecture.
+- Never say "30 seconds", "30s", or "in this short" in narration, titles, or on-screen copy. Just teach the code.
 - Java: public class Main in Main.java. Python: complete main.py. JavaScript: complete main.js.
 - Never invent stdout. Never claim the code already ran.
 - format must be "reel".
 - language must match the tutor plan. Set filename to Main.java, main.py, or main.js to match.
 - spoken_language must match the tutor plan. All spoken lines, takeaways, and the title use that spoken language.
 - lesson_id should be a short slug.
-""".strip()
+"""
+).strip()
 
 CODE_INSTRUCTION = """
 You are the Code Agent.
@@ -122,7 +143,10 @@ Return the full Lesson JSON.
 VISUAL_INSTRUCTION = """
 You are the Visual Agent.
 Given a lesson JSON, add highlight_ranges, narration segments, and visual callouts that match the actual example code.
-Walk through the important lines in order.
+Walk through the important teaching lines in order.
+Highlight ONLY lines that contain the idea being taught (callback, Promise, .then, async, await, etc.).
+Never highlight braces, class Main / main() wrappers, imports, comments, or empty lines.
+Each segment.text must quote or clearly name the highlighted code and say what it does and why.
 Do not invent execution iterations or stdout. The backend visualizer will fill iterations from real output.
 Return the full Lesson JSON.
 """.strip()
@@ -258,6 +282,7 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
     is_reel = plan.format == LessonFormat.reel
     message = (
         f"{spoken_generation_rules(plan.spoken_language)}\n"
+        f"{CODE_TEACHING_RULES}\n"
         f"Create the {'30-second catchy reel' if is_reel else 'lesson'}. Teach THIS topic; do not substitute a different concept.\n"
         f"lesson_id={lesson_id}\n"
         f"title={plan.title}\n"
@@ -281,7 +306,7 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
     lesson.topic = plan.topic
     if is_reel:
         title = plan.title or lesson.title
-        lesson.title = title if title.lower().startswith("30s") else f"30s: {title}"
+        lesson.title = strip_duration_copy(title) or plan.topic
         lesson = _normalize_reel(lesson)
     else:
         lesson.title = plan.title or lesson.title
@@ -302,7 +327,7 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
                 empty_main = True
         if scene.type in {"code", "execution"} and re.search(r"main\s*\([^)]*\)\s*\{\s*\}", code):
             empty_main = True
-    spoken_rules = spoken_generation_rules(plan.spoken_language)
+    spoken_rules = f"{spoken_generation_rules(plan.spoken_language)}\n{CODE_TEACHING_RULES}"
     if not has_code or empty_main:
         lesson = invoke_agent(CODE_AGENT, f"{spoken_rules}\n{lesson.model_dump_json()}")
         assert isinstance(lesson, Lesson)
@@ -530,6 +555,57 @@ def evaluate_answer(quiz_json: str, answer: str) -> EvaluationResult:
 
 
 def friendly_fallback_reply(message: str) -> str:
+    try:
+        return generate_text(
+            "You are a friendly coding tutor. Answer in 4 sentences or fewer.",
+            message,
+        )
+    except Exception:
+        return "I ran into a problem answering that. Try asking about a specific line of the code."
+
+
+def rewrite_reel_script(lesson: Lesson, code: str) -> ReelScriptDraft:
+    spoken = spoken_generation_rules(lesson.spoken_language)
+    ids = [scene.id for scene in lesson.scenes]
+    message = (
+        f"{spoken}\n{CODE_TEACHING_RULES}\n"
+        f"Rewrite the spoken script so it teaches THIS program, not a generic definition.\n"
+        f"Keep the same scene ids in this order: {ids}\n"
+        f"topic={lesson.topic}\n"
+        f"language={lesson.language}\n"
+        f"spoken_language={lesson.spoken_language}\n"
+        f"Program:\n{code}\n"
+        "Never say 30 seconds, 30s, or 'this short'. Quote real tokens. Say what this code does and why.\n"
+        "Intro: hook the trick in this program. Code: walk the important lines. "
+        "Execution: what the output proves. Summary: one takeaway plus a follow/save/comment ask."
+    )
+    draft = structured_generate(
+        "You rewrite coding-reel scripts. Return JSON only matching ReelScriptDraft.",
+        message,
+        ReelScriptDraft,
+        temperature=0.4,
+        label="reel_script_rewrite",
+    )
+    assert isinstance(draft, ReelScriptDraft)
+    by_id = {item.id: item for item in draft.scenes}
+    ordered = []
+    for scene in lesson.scenes:
+        item = by_id.get(scene.id)
+        if item is None:
+            item = next((row for row in draft.scenes if row.id not in {s.id for s in ordered}), None)
+        if item is None:
+            continue
+        ordered.append(
+            item.model_copy(
+                update={
+                    "id": scene.id,
+                    "narration": strip_duration_copy(item.narration) or item.narration,
+                }
+            )
+        )
+    if not ordered:
+        return draft
+    return ReelScriptDraft(scenes=ordered)
     try:
         return generate_text(
             "You are a friendly coding tutor. Answer in 4 sentences or fewer.",

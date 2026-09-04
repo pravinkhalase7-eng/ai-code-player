@@ -3,6 +3,27 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+_DURATION_COPY = re.compile(
+    r"^\s*30s:\s*|"
+    r"\b(?:in\s+)?30(?:\s*|-)?seconds?\b|"
+    r"\b30s\b|"
+    r"30\s*(?:सेकंड|सेकंद|வினாடிகளில்|வினாடி|సెకన్లలో|సెకన్|segundos?)\b|"
+    r"३०\s*(?:सेकंड|सेकंद)|"
+    r"सिर्फ\s*30|"
+    r"फक्त\s*३०|"
+    r"en\s*30\s*segundos",
+    re.IGNORECASE,
+)
+
+
+def strip_duration_copy(text: str) -> str:
+    cleaned = _DURATION_COPY.sub(" ", text or "")
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = re.sub(r"\s+([,.!?।])", r"\1", cleaned).strip(" :-–—")
+    if not cleaned:
+        return (text or "").strip()
+    return cleaned[0].upper() + cleaned[1:] if cleaned[0].islower() else cleaned
+
 _SPANISH_HINT = re.compile(
     r"[áéíóúñ¿¡]|\b(el|la|los|las|un|una|para|esto|este|código|bucle|aquí)\b",
     re.IGNORECASE,
@@ -43,7 +64,7 @@ LOCALES: tuple[SpokenLocale, ...] = (
             "en-US-Journey-F",
             "en-US-Studio-O",
         ),
-        reel_hook="Stop scrolling. Here is {topic} in 30 seconds.",
+        reel_hook="Stop scrolling. Here's {topic}.",
         reel_end="That's the trick. Save this and try it in your own file.",
         compile_error="Compilation Error. Let's read the compiler message together.",
     ),
@@ -60,7 +81,7 @@ LOCALES: tuple[SpokenLocale, ...] = (
             "hi-IN-Neural2-A",
             "hi-IN-Wavenet-A",
         ),
-        reel_hook="रुक जाओ। {topic} सिर्फ 30 सेकंड में।",
+        reel_hook="रुक जाओ। {topic} की असली ट्रिक ये है।",
         reel_end="यही ट्रिक है। सेव करो और अपनी फाइल में ट्राई करो।",
         compile_error="कंपाइल नहीं हुआ। चलो टर्मिनल में कंपाइलर का संदेश साथ में पढ़ते हैं।",
     ),
@@ -72,7 +93,7 @@ LOCALES: tuple[SpokenLocale, ...] = (
         language_code="ta-IN",
         voice="ta-IN-Chirp3-HD-Aoede",
         voice_fallbacks=("ta-IN-Chirp3-HD-Kore", "ta-IN-Neural2-A", "ta-IN-Wavenet-A"),
-        reel_hook="நிறுத்து. {topic} — 30 வினாடிகளில்.",
+        reel_hook="நிறுத்து. {topic} — இதோ டிரிக்.",
         reel_end="இதுதான் டிரிக். சேமித்து உங்கள் கோப்பில் முயற்சி செய்யுங்கள்.",
         compile_error="தொகுப்பு பிழை. கம்பைலர் செய்தியை டெர்மினலில் சேர்ந்து படிப்போம்.",
     ),
@@ -84,7 +105,7 @@ LOCALES: tuple[SpokenLocale, ...] = (
         language_code="te-IN",
         voice="te-IN-Chirp3-HD-Aoede",
         voice_fallbacks=("te-IN-Chirp3-HD-Kore", "te-IN-Standard-A", "te-IN-Standard-B"),
-        reel_hook="ఆగు. {topic} — 30 సెకన్లలో.",
+        reel_hook="ఆగు. {topic} — ఇదే ట్రిక్.",
         reel_end="ఇదే ట్రిక్. సేవ్ చేసి మీ ఫైల్‌లో ట్రై చేయండి.",
         compile_error="కంపైల్ కాలేదు. టెర్మినల్‌లో కంపైలర్ మెసేజ్ కలిసి చదుద్దాం.",
     ),
@@ -96,7 +117,7 @@ LOCALES: tuple[SpokenLocale, ...] = (
         language_code="mr-IN",
         voice="mr-IN-Chirp3-HD-Aoede",
         voice_fallbacks=("mr-IN-Chirp3-HD-Kore", "mr-IN-Wavenet-A", "mr-IN-Standard-A"),
-        reel_hook="थांबा. {topic} फक्त ३० सेकंदात.",
+        reel_hook="थांबा. {topic} ची ट्रिक ही आहे.",
         reel_end="हीच ट्रिक आहे. सेव्ह करा आणि स्वतःच्या फाइलमध्ये ट्राई करा.",
         compile_error="कंपाइल झाले नाही. टर्मिनलमधील कंपाइलर संदेश एकत्र वाचूया.",
     ),
@@ -108,7 +129,7 @@ LOCALES: tuple[SpokenLocale, ...] = (
         language_code="es-US",
         voice="es-US-Chirp3-HD-Aoede",
         voice_fallbacks=("es-US-Chirp3-HD-Kore", "es-US-Neural2-A", "es-US-Studio-B"),
-        reel_hook="Para. Aquí está {topic} en 30 segundos.",
+        reel_hook="Para. Aquí está el truco de {topic}.",
         reel_end="Ese es el truco. Guárdalo y pruébalo en tu archivo.",
         compile_error="Error de compilación. Leamos juntos el mensaje del compilador.",
     ),

@@ -18,6 +18,7 @@ from app.schemas.api import (
     ProgressUpdateRequest,
     QuizAnswerRequest,
     QuizAnswerResponse,
+    ReelScriptRequest,
     RunHelpRequest,
     RunHelpResponse,
 )
@@ -32,6 +33,7 @@ from app.services.lesson_service import (
     lesson_needs_google_audio,
     schedule_reel_thumbnail,
     refresh_reel_thumbnail,
+    update_reel_script,
 )
 from app.services.progress_service import get_or_create_progress, update_progress
 from app.services.quiz_service import evaluate_quiz
@@ -148,9 +150,9 @@ def _pending_lesson(row: LessonRow) -> Lesson:
             level=row.level,  # type: ignore[arg-type]
             format="reel",  # type: ignore[arg-type]
             topic=row.topic,
-            objectives=["Cutting a 30-second short"],
+            objectives=["Cutting a short"],
             scenes=[
-                IntroScene(id="scene_pending", duration=6, narration="Give me a moment while I cut this 30-second short."),
+                IntroScene(id="scene_pending", duration=6, narration="Give me a moment while I cut this short."),
                 CodeScene(
                     id="scene_code_pending",
                     duration=10,
@@ -244,6 +246,21 @@ def post_thumbnail(lesson_id: str, db: Session = Depends(get_db)) -> LessonRespo
     if row is None:
         raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
     lesson = refresh_reel_thumbnail(db, lesson_id)
+    return LessonResponse(lesson=lesson, status=row.status, warnings=row.warnings or [])
+
+
+@router.post("/lesson/{lesson_id}/script", response_model=LessonResponse)
+def post_reel_script(lesson_id: str, payload: ReelScriptRequest, db: Session = Depends(get_db)) -> LessonResponse:
+    row = db.get(LessonRow, lesson_id)
+    if row is None:
+        raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
+    lesson = update_reel_script(
+        db,
+        lesson_id,
+        code=payload.code,
+        scenes=payload.scenes,
+        rewrite=payload.rewrite,
+    )
     return LessonResponse(lesson=lesson, status=row.status, warnings=row.warnings or [])
 
 

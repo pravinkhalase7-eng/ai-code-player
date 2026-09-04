@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.services.images.base import get_image_provider
+from app.services.locale import strip_duration_copy
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +19,10 @@ def images_dir() -> Path:
 
 def thumbnail_prompt(topic: str, language: str) -> str:
     return (
-        f"Vertical 9:16 cinematic social-media thumbnail for a 30-second coding reel. "
+        f"Vertical 9:16 cinematic social-media thumbnail for a coding reel. "
         f"Topic: {topic}. Language: {language}. "
         f"Dark glossy background, neon amber and cyan light, huge readable title '{topic}', "
-        f"small badge '30s SHORT', abstract code rain, no watermarks, no celebrity faces, "
+        f"small badge 'BYTE', abstract code rain, no watermarks, no celebrity faces, "
         f"high contrast, catchy, viral educational poster."
     )
 
@@ -43,7 +44,7 @@ def write_svg_poster(dest: Path, topic: str, title: str, language: str) -> Path:
   <circle cx="920" cy="180" r="260" fill="#fbbf24" fill-opacity="0.16"/>
   <circle cx="120" cy="1680" r="320" fill="#22d3ee" fill-opacity="0.12"/>
   <rect x="72" y="96" rx="28" width="280" height="72" fill="#fbbf24"/>
-  <text x="212" y="144" text-anchor="middle" font-size="34" font-family="ui-sans-serif, system-ui" font-weight="800" fill="#18181b">30s SHORT</text>
+  <text x="212" y="144" text-anchor="middle" font-size="34" font-family="ui-sans-serif, system-ui" font-weight="800" fill="#18181b">BYTE</text>
   <text x="72" y="240" font-size="28" font-family="ui-sans-serif, system-ui" letter-spacing="8" fill="#fde68a">{safe_lang}</text>
   <text x="72" y="430" font-size="86" font-family="ui-sans-serif, system-ui" font-weight="800" fill="#fff7ed">{safe_title}</text>
   <text x="72" y="540" font-size="40" font-family="ui-sans-serif, system-ui" fill="#a1a1aa">{safe_topic}</text>
@@ -59,7 +60,8 @@ def ensure_reel_thumbnail(lesson_id: str, topic: str, title: str, language: str)
     folder = images_dir()
     svg_path = folder / f"thumb_{lesson_id}.svg"
     png_path = folder / f"thumb_{lesson_id}.png"
-    write_svg_poster(svg_path, topic, title, language)
+    poster_title = strip_duration_copy(title) or topic
+    write_svg_poster(svg_path, topic, poster_title, language)
     try:
         provider = get_image_provider()
         if provider.name != "local":

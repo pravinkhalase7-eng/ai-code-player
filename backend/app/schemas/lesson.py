@@ -369,6 +369,16 @@ class ChatReply(BaseModel):
     language: str | None = None
 
 
+class ReelSceneScript(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    narration: str = Field(min_length=1, max_length=2000)
+    takeaways: list[str] = Field(default_factory=list)
+
+
+class ReelScriptDraft(BaseModel):
+    scenes: list[ReelSceneScript] = Field(min_length=1)
+
+
 class TranslatedLines(BaseModel):
     lines: list[str] = Field(min_length=1)
 

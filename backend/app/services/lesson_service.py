@@ -22,13 +22,14 @@ from app.schemas.lesson import (
     ExecutionScene,
     Lesson,
     QuizScene,
+    ReelSceneScript,
     TerminalScene,
 )
-from app.agents.orchestrator import generate_structured_lesson, plan_lesson
+from app.agents.orchestrator import generate_structured_lesson, plan_lesson, rewrite_reel_script
 from app.db import SessionLocal
 from app.services.execution.client import execute_in_sandbox
 from app.services.jobs import create_job, enqueue, set_job
-from app.services.locale import spoken_locale, tts_voice_for
+from app.services.locale import spoken_locale, strip_duration_copy, tts_voice_for
 from app.services.tts.base import tts_hash
 from app.services.tts.factory import audio_file_ready, cache_provider_key, synthesize_narration
 from app.services.visualizer import extract_primary_code, run_command, source_filename, visualize_execution
@@ -60,7 +61,7 @@ def queue_lesson(
     lesson_id = new_id("les_")
     fmt = "reel" if format == "reel" else "lesson"
     spoken = spoken_locale(spoken_language).id
-    title = f"30s: {topic.title()}" if fmt == "reel" else topic.title()
+    title = topic.title()
     row = LessonRow(
         id=lesson_id,
         user_id=uid,
@@ -253,7 +254,7 @@ def refresh_reel_thumbnail(db: Session, lesson_id: str) -> Lesson:
     lesson = Lesson.model_validate(row.lesson_json)
     from app.services.images.thumbnail import ensure_reel_thumbnail
 
-    url = ensure_reel_thumbnail(lesson.lesson_id, lesson.topic, lesson.title, lesson.language)
+    url = ensure_reel_thumbnail(lesson.lesson_id, lesson.topic, lesson.topic, lesson.language)
     updated = lesson.model_copy(update={"thumbnail_url": url})
     persist_lesson(db, row, updated, list(row.warnings or []))
     return updated
@@ -420,3 +421,63 @@ def list_recent_lessons(db: Session, user_id: str) -> list[dict[str, Any]]:
             }
         )
     return results
+
+
+def update_reel_script(
+    db: Session,
+    lesson_id: str,
+    *,
+    code: str | None,
+    scenes: list[ReelSceneScript],
+    rewrite: bool,
+) -> Lesson:
+    row = db.get(LessonRow, lesson_id)
+    if row is None or not row.lesson_json:
+        raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
+    lesson = Lesson.model_validate(row.lesson_json)
+    _, existing = extract_primary_code(lesson.model_dump(mode="json"))
+    program = (code or "").strip() or existing
+    updates = {item.id: item for item in scenes}
+    if rewrite:
+        if not program.strip():
+            raise AppError(400, "Missing code", "Paste a program so Byte can rewrite the script.", "invalid")
+        draft = rewrite_reel_script(lesson, program)
+        updates = {item.id: item for item in draft.scenes}
+    next_scenes = []
+    for scene in lesson.scenes:
+        patch: dict[str, Any] = {}
+        item = updates.get(scene.id)
+        if item:
+            patch["narration"] = strip_duration_copy(item.narration) or item.narration
+            if item.takeaways and getattr(scene, "takeaways", None) is not None:
+                patch["takeaways"] = item.takeaways
+        if program and scene.type in {"code", "execution", "terminal"}:
+            patch["code"] = program
+            if scene.type == "code":
+                patch["highlight_ranges"] = []
+                patch["segments"] = []
+        next_scenes.append(scene.model_copy(update=patch) if patch else scene)
+    lesson = lesson.model_copy(
+        update={
+            "scenes": next_scenes,
+            "title": strip_duration_copy(lesson.title) or lesson.topic,
+        }
+    )
+    if program.strip():
+        try:
+            result = execute_in_sandbox(lesson.language, program)
+            lesson = _apply_execution(lesson, result)
+        except Exception:
+            logger.exception("sandbox run after script edit failed for %s", lesson_id)
+    warnings = list(row.warnings or [])
+    lesson = generate_lesson_assets(db, lesson, warnings, row=row)
+    persist_lesson(db, row, lesson, warnings)
+    try:
+        from app.services.images.thumbnail import ensure_reel_thumbnail
+
+        url = ensure_reel_thumbnail(lesson.lesson_id, lesson.topic, lesson.topic, lesson.language)
+        lesson = lesson.model_copy(update={"thumbnail_url": url})
+        persist_lesson(db, row, lesson, warnings)
+    except Exception:
+        logger.exception("thumbnail refresh after script edit failed for %s", lesson_id)
+    return lesson

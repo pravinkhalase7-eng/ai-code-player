@@ -3,6 +3,8 @@ import { audioSrc } from "@/lib/utils";
 import { visemeAt, VISEME_MOUTH } from "@/lib/viseme";
 import { buildCues, cueAt } from "@/lib/narrationSync";
 import { beatHighlight, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
+import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
+import { isPosterScene, reelCta } from "@/lib/reelCta";
 
 const WIDTH = 720;
 const HEIGHT = 1280;
@@ -44,6 +46,157 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number
   }
   if (current && lines.length < maxLines) lines.push(current);
   return lines;
+}
+
+const WATERMARK_SRC = "/techshala-logo.png";
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("image"));
+    image.src = url;
+  });
+}
+
+async function fetchImage(url: string): Promise<HTMLImageElement | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return await loadImage(URL.createObjectURL(blob));
+  } catch {
+    return null;
+  }
+}
+
+async function loadWatermark(): Promise<HTMLCanvasElement | null> {
+  const image = await fetchImage(WATERMARK_SRC);
+  if (!image) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const ink = canvas.getContext("2d");
+  if (!ink) return null;
+  ink.drawImage(image, 0, 0);
+  const pixels = ink.getImageData(0, 0, canvas.width, canvas.height);
+  const data = pixels.data;
+  for (let index = 0; index < data.length; index += 4) {
+    const r = data[index];
+    const g = data[index + 1];
+    const b = data[index + 2];
+    const white = r > 248 && g > 248 && b > 248;
+    const nearWhite = r > 220 && g > 220 && b > 220;
+    if (white) {
+      data[index + 3] = 0;
+    } else if (nearWhite) {
+      const fade = (Math.min(r, g, b) - 220) / 28;
+      data[index + 3] = Math.round(data[index + 3] * (1 - fade));
+    }
+  }
+  ink.putImageData(pixels, 0, 0);
+  return canvas;
+}
+
+function drawWatermark(ctx: CanvasRenderingContext2D, mark: HTMLCanvasElement | null) {
+  if (!mark) return;
+  const width = 96;
+  const height = width * (mark.height / Math.max(1, mark.width));
+  const pad = 10;
+  const x = WIDTH - width - 20;
+  const y = 48;
+  ctx.save();
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  roundRect(ctx, x - pad, y - pad, width + pad * 2, height + pad * 2, 16);
+  ctx.fill();
+  ctx.globalAlpha = 0.96;
+  ctx.drawImage(mark, x, y, width, height);
+  ctx.restore();
+}
+
+async function loadThumb(url?: string | null): Promise<HTMLImageElement | null> {
+  if (!url) return null;
+  return fetchImage(url);
+}
+
+function drawCoverImage(ctx: CanvasRenderingContext2D, image: HTMLImageElement | null) {
+  if (!image) return false;
+  const scale = Math.max(WIDTH / image.width, HEIGHT / image.height);
+  const width = image.width * scale;
+  const height = image.height * scale;
+  ctx.drawImage(image, (WIDTH - width) / 2, (HEIGHT - height) / 2, width, height);
+  const top = ctx.createLinearGradient(0, 0, 0, 180);
+  top.addColorStop(0, "rgba(0,0,0,0.72)");
+  top.addColorStop(1, "transparent");
+  ctx.fillStyle = top;
+  ctx.fillRect(0, 0, WIDTH, 180);
+  const bottom = ctx.createLinearGradient(0, HEIGHT - 320, 0, HEIGHT);
+  bottom.addColorStop(0, "transparent");
+  bottom.addColorStop(1, "rgba(0,0,0,0.78)");
+  ctx.fillStyle = bottom;
+  ctx.fillRect(0, HEIGHT - 320, WIDTH, 320);
+  return true;
+}
+
+function drawProgress(
+  ctx: CanvasRenderingContext2D,
+  sceneIndex: number,
+  sceneCount: number,
+  progress: number,
+) {
+  const count = Math.max(1, sceneCount);
+  const gap = 6;
+  const left = 24;
+  const width = WIDTH - 48;
+  const unit = (width - gap * (count - 1)) / count;
+  for (let index = 0; index < count; index += 1) {
+    const x = left + index * (unit + gap);
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    roundRect(ctx, x, 18, unit, 4, 2);
+    ctx.fill();
+    const fill =
+      index < sceneIndex ? 1 : index === sceneIndex ? Math.min(1, Math.max(0, progress)) : 0;
+    if (fill > 0) {
+      ctx.fillStyle = "#ffffff";
+      roundRect(ctx, x, 18, unit * fill, 4, 2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawFollowChip(ctx: CanvasRenderingContext2D, handle: string) {
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 18px ui-sans-serif, system-ui";
+  const handleW = ctx.measureText(handle).width;
+  ctx.fillText(handle, 28, 52);
+  const label = "FOLLOW";
+  ctx.font = "800 12px ui-sans-serif, system-ui";
+  const w = ctx.measureText(label).width + 22;
+  ctx.fillStyle = "#fbbf24";
+  roundRect(ctx, 28 + handleW + 14, 36, w, 22, 11);
+  ctx.fill();
+  ctx.fillStyle = "#18181b";
+  ctx.fillText(label, 28 + handleW + 25, 52);
+}
+
+function drawRail(ctx: CanvasRenderingContext2D) {
+  const labels = ["Like", "Comment", "Save", "Share"];
+  labels.forEach((label, index) => {
+    const y = HEIGHT - 430 + index * 78;
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.beginPath();
+    ctx.arc(WIDTH - 42, y, 22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "700 16px ui-sans-serif, system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText(["♥", "💬", "🔖", "↗"][index], WIDTH - 42, y + 6);
+    ctx.font = "700 11px ui-sans-serif, system-ui";
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.fillText(label, WIDTH - 42, y + 38);
+  });
+  ctx.textAlign = "left";
 }
 
 function drawStudioBackground(ctx: CanvasRenderingContext2D) {
@@ -255,62 +408,117 @@ function drawFrame(
   elapsed: number,
   duration: number,
   code: string,
+  thumb: HTMLImageElement | null,
+  sceneIndex: number,
+  sceneCount: number,
+  watermark: HTMLCanvasElement | null,
 ) {
-  drawStudioBackground(ctx);
+  const poster = isPosterScene(scene.type);
+  if (poster) {
+    if (!drawCoverImage(ctx, thumb)) drawStudioBackground(ctx);
+  } else {
+    drawStudioBackground(ctx);
+  }
   const debugging = scene.type === "execution" || scene.type === "terminal";
   const beats = debugging ? reelBeats(scene, code, duration) : [];
   const beat = debugging ? reelBeatAt(beats, elapsed) : null;
   const cue = cueAt(buildCues(scene, duration), elapsed);
-  const highlight = debugging
-    ? beatHighlight(beat)
-    : (cue?.highlight ?? scene.highlight_ranges?.[0] ?? null);
-  const caption =
-    debugging && beat?.description ? beat.description : cue?.text || scene.narration || "";
+  const highlight = debugging ? beatHighlight(beat) : (cue?.highlight ?? null);
+  const caption = stripDurationNoise(cue?.text || scene.narration || "");
   const outputLines = beat?.output ?? [];
   const vars = (beat?.variables || []).slice(0, 3).map((item) => `${item.name}=${item.value}`).join("  ");
+  const topic = displayTopic(lesson.topic);
+  const cta = reelCta(lesson, scene);
 
-  ctx.textAlign = "center";
-  ctx.fillStyle = "rgba(165,243,252,0.82)";
-  ctx.font = "700 13px ui-sans-serif, system-ui";
-  ctx.fillText(lesson.language.toUpperCase(), WIDTH / 2, 36);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "700 20px ui-sans-serif, system-ui";
-  wrapLines(ctx, lesson.topic, WIDTH - 80, 2).forEach((line, index) => {
-    ctx.fillText(line, WIDTH / 2, 62 + index * 24);
-  });
-  ctx.textAlign = "left";
+  drawProgress(ctx, sceneIndex, sceneCount, duration > 0 ? elapsed / duration : 0);
+  drawFollowChip(ctx, cta.handle);
 
-  const footer = 220;
-  const headerBottom = 88;
-  const available = HEIGHT - footer - headerBottom;
-  const lineCount = Math.max(1, (code || " ").replace(/\n$/, "").split("\n").length);
-  const consoleH = debugging ? Math.min(158, 52 + Math.max(1, outputLines.length) * 20) : 0;
-  const ideH = Math.min(available, Math.max(220, 38 + lineCount * 22 + 24 + consoleH));
-  const ideTop = headerBottom + Math.max(0, (available - ideH) / 2);
-  const filename = scene.filename || "Main.java";
-  drawIdeWindow(
-    ctx,
-    28,
-    ideTop,
-    WIDTH - 56,
-    ideH,
-    filename,
-    code,
-    highlight,
-    debugging
-      ? {
-          label: beat ? `OUTPUT  ·  ${beat.label}` : "OUTPUT",
-          condition: beat?.condition
-            ? `${beat.condition} → ${beat.condition_result ? "true" : "false"}`
-            : undefined,
-          stopped: beat?.stopped,
-          variables: vars,
-          lines: outputLines,
-          latest: beat?.latest,
-        }
-      : undefined,
-  );
+  if (poster) {
+    ctx.textAlign = "center";
+    if (scene.type === "summary") {
+      ctx.fillStyle = "rgba(0,0,0,0.72)";
+      roundRect(ctx, 40, HEIGHT - 430, WIDTH - 160, 210, 24);
+      ctx.fill();
+      ctx.fillStyle = "#fcd34d";
+      ctx.font = "700 14px ui-sans-serif, system-ui";
+      ctx.fillText("SAVE THIS", WIDTH / 2 - 40, HEIGHT - 388);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "800 28px ui-sans-serif, system-ui";
+      wrapLines(ctx, cta.endLine, WIDTH - 220, 2).forEach((line, index) => {
+        ctx.fillText(line, WIDTH / 2 - 40, HEIGHT - 348 + index * 34);
+      });
+      const pulse = 1 + 0.04 * Math.sin(elapsed * 6);
+      ctx.save();
+      ctx.translate(WIDTH / 2 - 40, HEIGHT - 268);
+      ctx.scale(pulse, pulse);
+      ctx.fillStyle = "#fbbf24";
+      roundRect(ctx, -150, -22, 300, 44, 22);
+      ctx.fill();
+      ctx.fillStyle = "#18181b";
+      ctx.font = "800 16px ui-sans-serif, system-ui";
+      ctx.fillText(cta.endAction, 0, 6);
+      ctx.restore();
+      ctx.fillStyle = "#e4e4e7";
+      ctx.font = "600 16px ui-sans-serif, system-ui";
+      wrapLines(ctx, cta.comment, WIDTH - 220, 2).forEach((line, index) => {
+        ctx.fillText(line, WIDTH / 2 - 40, HEIGHT - 228 + index * 22);
+      });
+    } else if (!thumb) {
+      ctx.fillStyle = "rgba(165,243,252,0.95)";
+      ctx.font = "700 16px ui-sans-serif, system-ui";
+      ctx.fillText(lesson.language.toUpperCase(), WIDTH / 2, 240);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "800 44px ui-sans-serif, system-ui";
+      wrapLines(ctx, topic, WIDTH - 100, 3).forEach((line, index) => {
+        ctx.fillText(line, WIDTH / 2, 310 + index * 52);
+      });
+    }
+    ctx.textAlign = "left";
+  } else {
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(165,243,252,0.9)";
+    ctx.font = "700 16px ui-sans-serif, system-ui";
+    ctx.fillText(lesson.language.toUpperCase(), WIDTH / 2, 88);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "700 28px ui-sans-serif, system-ui";
+    wrapLines(ctx, topic, WIDTH - 120, 2).forEach((line, index) => {
+      ctx.fillText(line, WIDTH / 2, 126 + index * 34);
+    });
+    ctx.textAlign = "left";
 
+    const footer = 220;
+    const headerBottom = 188;
+    const available = HEIGHT - footer - headerBottom;
+    const lineCount = Math.max(1, (code || " ").replace(/\n$/, "").split("\n").length);
+    const consoleH = debugging ? Math.min(158, 52 + Math.max(1, outputLines.length) * 20) : 0;
+    const ideH = Math.min(available, Math.max(220, 38 + lineCount * 22 + 24 + consoleH));
+    const ideTop = headerBottom + Math.max(0, (available - ideH) / 2);
+    const filename = scene.filename || "Main.java";
+    drawIdeWindow(
+      ctx,
+      28,
+      ideTop,
+      WIDTH - 108,
+      ideH,
+      filename,
+      code,
+      highlight,
+      debugging
+        ? {
+            label: beat ? `OUTPUT  ·  ${beat.label}` : "OUTPUT",
+            condition: beat?.condition
+              ? `${beat.condition} → ${beat.condition_result ? "true" : "false"}`
+              : undefined,
+            stopped: beat?.stopped,
+            variables: vars,
+            lines: outputLines,
+            latest: beat?.latest,
+          }
+        : undefined,
+    );
+  }
+
+  drawRail(ctx);
   const viseme = visemeAt(scene.narration || "", elapsed, true, duration);
   drawByte(ctx, 16, HEIGHT - 236, 0.82, viseme);
   ctx.fillStyle = "rgba(165,243,252,0.9)";
@@ -318,21 +526,17 @@ function drawFrame(
   ctx.fillText("BYTE", 58, HEIGHT - 72);
 
   ctx.fillStyle = "rgba(0,0,0,0.62)";
-  roundRect(ctx, 148, HEIGHT - 148, WIDTH - 176, 92, 18);
+  roundRect(ctx, 148, HEIGHT - 148, WIDTH - 230, 92, 18);
   ctx.fill();
   ctx.strokeStyle = "rgba(255,255,255,0.1)";
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.fillStyle = "#fff";
   ctx.font = "600 18px ui-sans-serif, system-ui";
-  wrapLines(ctx, caption, WIDTH - 214, 3).forEach((line, index) => {
+  wrapLines(ctx, caption, WIDTH - 268, 3).forEach((line, index) => {
     ctx.fillText(line, 164, HEIGHT - 116 + index * 22);
   });
-  if (highlight?.label) {
-    ctx.fillStyle = "#fcd34d";
-    ctx.font = "700 11px ui-sans-serif, system-ui";
-    ctx.fillText(highlight.label.toUpperCase(), 164, HEIGHT - 68);
-  }
+  drawWatermark(ctx, watermark);
 }
 
 function roundRect(
@@ -382,7 +586,7 @@ export async function exportReelVideo(
   recorder.ondataavailable = (event) => {
     if (event.data.size) chunks.push(event.data);
   };
-  const stopped = new Promise<Blob>((resolve, reject) => {
+  const stopped = new Promise((resolve, reject) => {
     recorder.onstop = () => resolve(new Blob(chunks, { type: mime }));
     recorder.onerror = () => reject(new Error("Reel recording failed."));
   });
@@ -390,6 +594,8 @@ export async function exportReelVideo(
 
   const scenes = lesson.scenes;
   let lastCode = scenes.find((item) => item.code?.trim())?.code || "";
+  const thumb = await loadThumb(lesson.thumbnail_url);
+  const watermark = await loadWatermark();
 
   try {
     for (let index = 0; index < scenes.length; index += 1) {
@@ -409,10 +615,10 @@ export async function exportReelVideo(
         source.start();
       }
       const started = performance.now();
-      await new Promise<void>((resolve) => {
+      await new Promise((resolve) => {
         const tick = () => {
           const elapsed = (performance.now() - started) / 1000;
-          drawFrame(ctx, lesson, scene, elapsed, duration, lastCode);
+          drawFrame(ctx, lesson, scene, elapsed, duration, lastCode, thumb, index, scenes.length, watermark);
           if (elapsed >= duration) {
             resolve();
             return;

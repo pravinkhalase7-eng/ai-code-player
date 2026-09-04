@@ -152,6 +152,20 @@ export function generateThumbnail(lessonId: string) {
   );
 }
 
+export function saveReelScript(
+  lessonId: string,
+  payload: {
+    code?: string;
+    scenes: { id: string; narration: string; takeaways?: string[] }[];
+    rewrite?: boolean;
+  },
+) {
+  return request<{ lesson: Lesson; status: string; warnings: string[] }>(
+    `/api/v1/lesson/${lessonId}/script`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
 export function startRender(lessonId: string) {
   return request<{ job_id: string; status: string }>(`/api/v1/lesson/${lessonId}/render`, {
     method: "POST",

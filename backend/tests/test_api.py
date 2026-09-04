@@ -138,7 +138,80 @@ def test_quiz_and_progress(tmp_path: Path) -> None:
         db.close()
 
 
-def test_tts_cache_reuses_hash(tmp_path: Path, monkeypatch) -> None:
+def test_save_reel_script_updates_narration(tmp_path: Path, monkeypatch) -> None:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "storage_path", tmp_path)
+    monkeypatch.setattr(settings, "tts_provider", "browser")
+    monkeypatch.setattr(settings, "tts_fallback_provider", "browser")
+    monkeypatch.setattr(settings, "image_provider", "local")
+    db = SessionLocal()
+    try:
+        user = db.get(User, "demo-user")
+        assert user is not None
+        lesson_id = f"les_{uuid4().hex[:8]}"
+        payload = {
+            "lesson_id": lesson_id,
+            "title": "30s: Java For Loop",
+            "language": "java",
+            "level": "beginner",
+            "format": "reel",
+            "topic": "for loop",
+            "objectives": ["Show a tiny example"],
+            "scenes": [
+                {"id": "hook", "type": "intro", "duration": 6, "narration": "Stop scrolling. Java for loops in 30 seconds."},
+                {
+                    "id": "code",
+                    "type": "code",
+                    "duration": 12,
+                    "language": "java",
+                    "code": "public class Main {\n    public static void main(String[] args) {\n        System.out.println(1);\n    }\n}\n",
+                    "narration": "This prints one.",
+                },
+                {
+                    "id": "run",
+                    "type": "execution",
+                    "duration": 7,
+                    "code": "public class Main {\n    public static void main(String[] args) {\n        System.out.println(1);\n    }\n}\n",
+                    "narration": "Watch the output.",
+                },
+                {"id": "end", "type": "summary", "duration": 5, "narration": "Save this.", "takeaways": ["println"]},
+            ],
+        }
+        db.add(
+            LessonRow(
+                id=lesson_id,
+                user_id=user.id,
+                title=payload["title"],
+                language="java",
+                level="beginner",
+                topic="for loop",
+                status="ready",
+                lesson_json=payload,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+    edited = "This print starts at 1 and that is the whole trick."
+    response = client.post(
+        f"/api/v1/lesson/{lesson_id}/script",
+        json={
+            "code": payload["scenes"][1]["code"],
+            "rewrite": False,
+            "scenes": [
+                {"id": "hook", "narration": edited},
+                {"id": "code", "narration": "System.out.println(1) writes 1."},
+                {"id": "run", "narration": "The run prints 1."},
+                {"id": "end", "narration": "Remember println.", "takeaways": ["println"]},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    lesson = response.json()["lesson"]
+    assert lesson["title"] == "Java For Loop"
+    assert lesson["scenes"][0]["narration"] == edited
+    assert "30" not in lesson["title"]
     from app.config import settings
 
     monkeypatch.setattr(settings, "storage_path", tmp_path)
