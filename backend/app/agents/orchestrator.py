@@ -4,6 +4,7 @@ import logging
 import re
 
 from app.config import settings
+from app.errors import AppError
 from app.schemas.lesson import ChatReply, EvaluationResult, Lesson, LessonDraft, LessonFormat, ReelScriptDraft, TranslatedLines, TutorPlan, lesson_from_draft
 from app.services.gemini_client import generate_text, structured_generate
 from app.services.locale import needs_localization, spoken_generation_rules, spoken_locale, strip_duration_copy, uses_spoken_script
@@ -565,6 +566,21 @@ def friendly_fallback_reply(message: str) -> str:
 
 
 def rewrite_reel_script(lesson: Lesson, code: str) -> ReelScriptDraft:
+    try:
+        return _rewrite_reel_script(lesson, code)
+    except AppError:
+        raise
+    except Exception:
+        logger.exception("rewrite_reel_script failed")
+        raise AppError(
+            502,
+            "Could not rewrite the script",
+            "Byte could not rewrite the spoken lines from that program. Try again.",
+            "gemini_failed",
+        )
+
+
+def _rewrite_reel_script(lesson: Lesson, code: str) -> ReelScriptDraft:
     spoken = spoken_generation_rules(lesson.spoken_language)
     ids = [scene.id for scene in lesson.scenes]
     message = (
@@ -595,11 +611,14 @@ def rewrite_reel_script(lesson: Lesson, code: str) -> ReelScriptDraft:
             item = next((row for row in draft.scenes if row.id not in {s.id for s in ordered}), None)
         if item is None:
             continue
+        narration = (strip_duration_copy(item.narration) or item.narration).strip()[:2000]
+        if not narration:
+            narration = scene.narration
         ordered.append(
             item.model_copy(
                 update={
                     "id": scene.id,
-                    "narration": strip_duration_copy(item.narration) or item.narration,
+                    "narration": narration,
                 }
             )
         )

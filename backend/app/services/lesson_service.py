@@ -434,6 +434,34 @@ def update_reel_script(
     row = db.get(LessonRow, lesson_id)
     if row is None or not row.lesson_json:
         raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
+    try:
+        return _update_reel_script(db, row, lesson_id, code=code, scenes=scenes, rewrite=rewrite)
+    except AppError:
+        raise
+    except Exception:
+        logger.exception("reel script update failed for %s", lesson_id)
+        raise AppError(
+            500,
+            "Could not update the script",
+            "Byte could not rewrite that script. Try again in a moment.",
+            "script_failed",
+        )
+
+
+def _clip_narration(text: str, fallback: str) -> str:
+    cleaned = (strip_duration_copy(text) or text or fallback).strip()
+    return (cleaned or fallback)[:2000]
+
+
+def _update_reel_script(
+    db: Session,
+    row: LessonRow,
+    lesson_id: str,
+    *,
+    code: str | None,
+    scenes: list[ReelSceneScript],
+    rewrite: bool,
+) -> Lesson:
     lesson = Lesson.model_validate(row.lesson_json)
     _, existing = extract_primary_code(lesson.model_dump(mode="json"))
     program = (code or "").strip() or existing
@@ -448,14 +476,18 @@ def update_reel_script(
         patch: dict[str, Any] = {}
         item = updates.get(scene.id)
         if item:
-            patch["narration"] = strip_duration_copy(item.narration) or item.narration
+            narration = _clip_narration(item.narration, scene.narration)
+            if narration != scene.narration:
+                patch["narration"] = narration
+                patch["audio_url"] = None
+                patch["segments"] = []
             if item.takeaways and getattr(scene, "takeaways", None) is not None:
-                patch["takeaways"] = item.takeaways
+                patch["takeaways"] = item.takeaways[:8]
         if program and scene.type in {"code", "execution", "terminal"}:
             patch["code"] = program
             if scene.type == "code":
                 patch["highlight_ranges"] = []
-                patch["segments"] = []
+                patch["segments"] = patch.get("segments", [])
         next_scenes.append(scene.model_copy(update=patch) if patch else scene)
     lesson = lesson.model_copy(
         update={
@@ -470,14 +502,7 @@ def update_reel_script(
         except Exception:
             logger.exception("sandbox run after script edit failed for %s", lesson_id)
     warnings = list(row.warnings or [])
-    lesson = generate_lesson_assets(db, lesson, warnings, row=row)
     persist_lesson(db, row, lesson, warnings)
-    try:
-        from app.services.images.thumbnail import ensure_reel_thumbnail
-
-        url = ensure_reel_thumbnail(lesson.lesson_id, lesson.topic, lesson.topic, lesson.language)
-        lesson = lesson.model_copy(update={"thumbnail_url": url})
-        persist_lesson(db, row, lesson, warnings)
-    except Exception:
-        logger.exception("thumbnail refresh after script edit failed for %s", lesson_id)
+    schedule_google_audio(lesson_id)
+    schedule_reel_thumbnail(lesson_id)
     return lesson

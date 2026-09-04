@@ -212,6 +212,96 @@ def test_save_reel_script_updates_narration(tmp_path: Path, monkeypatch) -> None
     assert lesson["title"] == "Java For Loop"
     assert lesson["scenes"][0]["narration"] == edited
     assert "30" not in lesson["title"]
+
+
+def test_rewrite_reel_script_returns_without_blocking_on_tts(tmp_path: Path, monkeypatch) -> None:
+    from app.config import settings
+    from app.schemas.lesson import ReelScriptDraft, ReelSceneScript
+    import app.services.lesson_service as lesson_service
+
+    monkeypatch.setattr(settings, "storage_path", tmp_path)
+    monkeypatch.setattr(settings, "tts_provider", "browser")
+    monkeypatch.setattr(settings, "tts_fallback_provider", "browser")
+    monkeypatch.setattr(settings, "image_provider", "local")
+    monkeypatch.setattr(
+        lesson_service,
+        "rewrite_reel_script",
+        lambda lesson, code: ReelScriptDraft(
+            scenes=[
+                ReelSceneScript(id="hook", narration="This program starts a counter at zero."),
+                ReelSceneScript(id="code", narration="System.out.println(1) prints 1."),
+                ReelSceneScript(id="run", narration="The run prints 1 and stops."),
+                ReelSceneScript(id="end", narration="Save this println trick.", takeaways=["println"]),
+            ]
+        ),
+    )
+    monkeypatch.setattr(lesson_service, "execute_in_sandbox", lambda language, code: type("R", (), {"stdout": ["1"], "stderr": "", "success": True, "compile_error": False})())
+    monkeypatch.setattr(lesson_service, "schedule_google_audio", lambda lesson_id: None)
+    monkeypatch.setattr(lesson_service, "schedule_reel_thumbnail", lambda lesson_id: None)
+    db = SessionLocal()
+    try:
+        user = db.get(User, "demo-user")
+        assert user is not None
+        lesson_id = f"les_{uuid4().hex[:8]}"
+        payload = {
+            "lesson_id": lesson_id,
+            "title": "Java For Loop",
+            "language": "java",
+            "level": "beginner",
+            "format": "reel",
+            "topic": "for loop",
+            "objectives": ["Show a tiny example"],
+            "scenes": [
+                {"id": "hook", "type": "intro", "duration": 6, "narration": "Old hook."},
+                {
+                    "id": "code",
+                    "type": "code",
+                    "duration": 12,
+                    "language": "java",
+                    "code": "public class Main {\n    public static void main(String[] args) {\n        System.out.println(1);\n    }\n}\n",
+                    "narration": "Old code line.",
+                },
+                {
+                    "id": "run",
+                    "type": "execution",
+                    "duration": 7,
+                    "code": "public class Main {\n    public static void main(String[] args) {\n        System.out.println(1);\n    }\n}\n",
+                    "narration": "Old run.",
+                },
+                {"id": "end", "type": "summary", "duration": 5, "narration": "Old end.", "takeaways": ["println"]},
+            ],
+        }
+        db.add(
+            LessonRow(
+                id=lesson_id,
+                user_id=user.id,
+                title=payload["title"],
+                language="java",
+                level="beginner",
+                topic="for loop",
+                status="ready",
+                lesson_json=payload,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+    response = client.post(
+        f"/api/v1/lesson/{lesson_id}/script",
+        json={
+            "code": payload["scenes"][1]["code"],
+            "rewrite": True,
+            "scenes": [
+                {"id": "hook", "narration": "Old hook."},
+                {"id": "code", "narration": "Old code line."},
+                {"id": "run", "narration": "Old run."},
+                {"id": "end", "narration": "Old end."},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    lesson = response.json()["lesson"]
+    assert "counter at zero" in lesson["scenes"][0]["narration"]
     from app.config import settings
 
     monkeypatch.setattr(settings, "storage_path", tmp_path)
