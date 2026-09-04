@@ -2,6 +2,7 @@
 
 import { Pause, Play, RotateCcw, SkipBack, SkipForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { LessonScene } from "@/types/lesson";
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75];
@@ -35,6 +36,7 @@ export function PlayerTransport({
   onPrev,
   onNext,
   onReplay,
+  compact = false,
 }: {
   scenes: LessonScene[];
   index: number;
@@ -49,6 +51,7 @@ export function PlayerTransport({
   onPrev: () => void;
   onNext: () => void;
   onReplay: () => void;
+  compact?: boolean;
 }) {
   const lengths = scenes.map((scene, sceneIndex) =>
     sceneLength(scene, sceneIndex === index ? duration : undefined),
@@ -60,8 +63,8 @@ export function PlayerTransport({
   const lessonProgress = (lessonTime / lessonTotal) * 100;
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-zinc-950/70 p-4">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+    <div className={cn("rounded-2xl border border-white/10 bg-zinc-950/70", compact ? "p-2.5" : "p-4")}>
+      <div className={cn("flex flex-wrap items-center gap-2", compact ? "mb-2" : "mb-3")}>
         <Button variant="ghost" size="icon" onClick={onPrev} aria-label="Previous scene">
           <SkipBack className="h-4 w-4" />
         </Button>
@@ -79,7 +82,7 @@ export function PlayerTransport({
         </p>
       </div>
 
-      <label className="block text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+      <label className={cn("block text-[11px] uppercase tracking-[0.2em] text-zinc-500", compact && "hidden")}>
         Scene
         <input
           type="range"
@@ -94,8 +97,8 @@ export function PlayerTransport({
         />
       </label>
 
-      <label className="mt-3 block text-[11px] uppercase tracking-[0.2em] text-zinc-500">
-        Lesson
+      <label className={cn("block text-[11px] uppercase tracking-[0.2em] text-zinc-500", compact ? "mt-0" : "mt-3")}>
+        {compact ? "Progress" : "Lesson"}
         <input
           type="range"
           min={0}
@@ -123,7 +126,7 @@ export function PlayerTransport({
         {formatTime(lessonTime)} / {formatTime(lessonTotal)}
       </p>
 
-      <div className="mt-3 flex flex-wrap items-center gap-3">
+      <div className={cn("flex flex-wrap items-center gap-3", compact ? "mt-2" : "mt-3")}>
         <span className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Speed</span>
         <input
           type="range"
@@ -136,6 +139,7 @@ export function PlayerTransport({
           aria-label="Playback speed"
         />
         <span className="w-12 text-xs tabular-nums text-amber-200">{rate.toFixed(2)}x</span>
+        {compact ? null : (
         <div className="flex flex-wrap gap-1">
           {RATES.map((value) => (
             <button
@@ -150,6 +154,7 @@ export function PlayerTransport({
             </button>
           ))}
         </div>
+        )}
       </div>
     </div>
   );

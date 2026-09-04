@@ -32,6 +32,7 @@ def _missing_keys() -> list[str]:
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     Path(settings.storage_path).mkdir(parents=True, exist_ok=True)
     (Path(settings.storage_path) / "audio").mkdir(parents=True, exist_ok=True)
+    (Path(settings.storage_path) / "images").mkdir(parents=True, exist_ok=True)
     try:
         init_db()
     except Exception:
@@ -68,7 +69,10 @@ app.add_middleware(
 
 audio_dir = Path(settings.storage_path) / "audio"
 audio_dir.mkdir(parents=True, exist_ok=True)
+images_dir = Path(settings.storage_path) / "images"
+images_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/audio", StaticFiles(directory=str(audio_dir)), name="audio")
+app.mount("/images", StaticFiles(directory=str(images_dir)), name="images")
 app.include_router(v1_router, prefix="/api/v1")
 
 

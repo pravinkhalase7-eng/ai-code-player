@@ -99,7 +99,9 @@ def resume_lesson_job(db: Session, lesson_id: str) -> None:
                 "lesson_id": row.id,
                 "topic": row.topic,
                 "language": row.language,
+                "spoken_language": (row.lesson_json or {}).get("spoken_language") or "en",
                 "level": row.level,
+                "format": (row.lesson_json or {}).get("format") or "lesson",
                 "user_id": row.user_id,
             },
         )

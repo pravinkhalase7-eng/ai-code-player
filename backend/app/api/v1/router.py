@@ -24,7 +24,15 @@ from app.schemas.api import (
 from app.schemas.lesson import Lesson
 from app.services.chat_service import ask_tutor
 from app.services.jobs import create_job, enqueue, resume_lesson_job
-from app.services.lesson_service import list_recent_lessons, queue_lesson, record_execution, schedule_google_audio, lesson_needs_google_audio
+from app.services.lesson_service import (
+    list_recent_lessons,
+    queue_lesson,
+    record_execution,
+    schedule_google_audio,
+    lesson_needs_google_audio,
+    schedule_reel_thumbnail,
+    refresh_reel_thumbnail,
+)
 from app.services.progress_service import get_or_create_progress, update_progress
 from app.services.quiz_service import evaluate_quiz
 from app.services.run_help import explain_run_error
@@ -41,6 +49,7 @@ def create_lesson(payload: LessonCreateRequest, db: Session = Depends(get_db)) -
         level=payload.level.value,
         user_id=payload.user_id,
         format=payload.format.value,
+        spoken_language=payload.spoken_language,
     )
     return LessonCreateResponse(lesson_id=lesson_id, status="queued", job_id=job_id)
 
@@ -70,10 +79,12 @@ def execute_code(payload: ExecuteRequest, db: Session = Depends(get_db)) -> Exec
 @router.post("/code/run-help", response_model=RunHelpResponse)
 def run_help(payload: RunHelpRequest, db: Session = Depends(get_db)) -> RunHelpResponse:
     topic = ""
+    spoken_language = "en"
     if payload.lesson_id:
         row = db.get(LessonRow, payload.lesson_id)
         if row is not None:
             topic = row.topic
+            spoken_language = (row.lesson_json or {}).get("spoken_language") or "en"
     help_text = explain_run_error(
         language=payload.language,
         code=payload.code,
@@ -81,6 +92,7 @@ def run_help(payload: RunHelpRequest, db: Session = Depends(get_db)) -> RunHelpR
         compile_error=payload.compile_error,
         timed_out=payload.timed_out,
         topic=topic,
+        spoken_language=spoken_language,
     )
     return RunHelpResponse(
         issue=help_text.issue,
@@ -117,6 +129,8 @@ def get_lesson(lesson_id: str, db: Session = Depends(get_db)) -> LessonResponse:
     lesson = Lesson.model_validate(row.lesson_json)
     if lesson_needs_google_audio(lesson):
         schedule_google_audio(row.id)
+    if (lesson.format.value == "reel") and not (lesson.thumbnail_url or "").strip():
+        schedule_reel_thumbnail(row.id)
     return LessonResponse(lesson=lesson, status=row.status, warnings=row.warnings or [])
 
 
@@ -124,11 +138,13 @@ def _pending_lesson(row: LessonRow) -> Lesson:
     from app.schemas.lesson import CodeScene, IntroScene, QuizScene, SummaryScene
 
     fmt = (row.lesson_json or {}).get("format") or "lesson"
+    spoken = (row.lesson_json or {}).get("spoken_language") or "en"
     if fmt == "reel":
         return Lesson(
             lesson_id=row.id,
             title=row.title,
             language=row.language,
+            spoken_language=spoken,
             level=row.level,  # type: ignore[arg-type]
             format="reel",  # type: ignore[arg-type]
             topic=row.topic,
@@ -153,6 +169,7 @@ def _pending_lesson(row: LessonRow) -> Lesson:
         lesson_id=row.id,
         title=row.title,
         language=row.language,
+        spoken_language=spoken,
         level=row.level,  # type: ignore[arg-type]
         topic=row.topic,
         objectives=["Building a visual lesson"],
@@ -219,6 +236,15 @@ def post_progress(
         scene_index=row.scene_index,
         time_spent_ms=row.time_spent_ms,
     )
+
+
+@router.post("/lesson/{lesson_id}/thumbnail", response_model=LessonResponse)
+def post_thumbnail(lesson_id: str, db: Session = Depends(get_db)) -> LessonResponse:
+    row = db.get(LessonRow, lesson_id)
+    if row is None:
+        raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
+    lesson = refresh_reel_thumbnail(db, lesson_id)
+    return LessonResponse(lesson=lesson, status=row.status, warnings=row.warnings or [])
 
 
 @router.post("/lesson/{lesson_id}/render", response_model=JobResponse)

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { LessonPlayer } from "@/components/player/LessonPlayer";
 import { Button } from "@/components/ui/button";
 import { createLesson, getLesson, getProgress } from "@/lib/api";
+import { SPOKEN_LANGUAGES } from "@/lib/spokenLanguage";
 import type { Lesson } from "@/types/lesson";
 
 const STATUS_COPY: Record<string, string> = {
@@ -109,6 +110,7 @@ export function LearnClient({ lessonId }: { lessonId: string }) {
         lesson?.language || "java",
         lesson?.level || "beginner",
         lesson?.format || "lesson",
+        lesson?.spoken_language || "en",
       );
       router.replace(`/learn/${created.lesson_id}`);
     } catch (err) {
@@ -143,6 +145,11 @@ export function LearnClient({ lessonId }: { lessonId: string }) {
               ? "Byte is cutting your 30-second short…"
               : "Byte is preparing your visual lesson…")}
         </p>
+        {lesson?.spoken_language && lesson.spoken_language !== "en" ? (
+          <p className="text-sm text-sky-200">
+            Teaching in {SPOKEN_LANGUAGES.find((item) => item.id === lesson.spoken_language)?.label || lesson.spoken_language}
+          </p>
+        ) : null}
         <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">
           {status}
           {elapsed > 0 ? ` · ${elapsed}s` : ""}

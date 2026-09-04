@@ -4,12 +4,14 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.lesson import EvaluationResult, ExecutionStep, Lesson, LessonFormat, LessonLevel
+from app.services.locale import normalize_spoken_language
 from app.services.visualizer import normalize_language
 
 
 class LessonCreateRequest(BaseModel):
     topic: str = Field(min_length=1, max_length=200)
     language: str = Field(default="java", min_length=1, max_length=32)
+    spoken_language: str = Field(default="en", min_length=1, max_length=32)
     level: LessonLevel = LessonLevel.beginner
     format: LessonFormat = LessonFormat.lesson
     user_id: str | None = None
@@ -18,6 +20,11 @@ class LessonCreateRequest(BaseModel):
     @classmethod
     def _language(cls, value: str) -> str:
         return normalize_language(value)
+
+    @field_validator("spoken_language")
+    @classmethod
+    def _spoken(cls, value: str) -> str:
+        return normalize_spoken_language(value)
 
 
 class LessonCreateResponse(BaseModel):

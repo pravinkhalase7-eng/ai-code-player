@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Sparkles, TerminalSquare, Volume2 } from "lucide-react";
+import { Download, Film, ImageIcon, Sparkles, TerminalSquare, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CodeWorkbench } from "@/components/editor/CodeWorkbench";
 import { QuizCard } from "@/components/player/QuizCard";
@@ -9,10 +9,13 @@ import { ExecutionStepper } from "@/components/player/ExecutionStepper";
 import { PlayerTransport } from "@/components/player/PlayerTransport";
 import { Terminal } from "@/components/player/Terminal";
 import { TutorAvatar } from "@/components/tutor/TutorAvatar";
-import { answerQuiz, executeCode, explainRunError, saveProgress, sendChat } from "@/lib/api";
+import { ReelStage } from "@/components/player/ReelStage";
+import { answerQuiz, executeCode, explainRunError, generateThumbnail, saveProgress, sendChat } from "@/lib/api";
+import { downloadBlob, exportReelVideo, fileExtension } from "@/lib/reelExport";
 import { defaultCode, runCommand, sourceFilename } from "@/lib/language";
 import { audioSrc, cn } from "@/lib/utils";
 import { buildCues, cueAt } from "@/lib/narrationSync";
+import { SPOKEN_LANGUAGES } from "@/lib/spokenLanguage";
 import type { ExecutionStep, HighlightRange, Lesson, LessonScene, RunHelp, TutorExpression } from "@/types/lesson";
 
 export function LessonPlayer({
@@ -52,6 +55,11 @@ export function LessonPlayer({
   const started = useRef(Date.now());
   const scene = scenes[index];
   const [needsGesture, setNeedsGesture] = useState(true);
+  const [thumbUrl, setThumbUrl] = useState(lesson.thumbnail_url || "");
+  const [thumbBusy, setThumbBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportLabel, setExportLabel] = useState("");
+  const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const indexRef = useRef(index);
   const playingRef = useRef(playing);
   indexRef.current = index;
@@ -78,6 +86,13 @@ export function LessonPlayer({
       setHighlight(null);
     }
   }, [index, scene, exampleCode]);
+
+  useEffect(() => {
+    if (lesson.format !== "reel" || thumbUrl) return;
+    void generateThumbnail(lesson.lesson_id)
+      .then((payload) => setThumbUrl(payload.lesson.thumbnail_url || ""))
+      .catch(() => undefined);
+  }, [lesson.format, lesson.lesson_id, thumbUrl]);
 
   const lastPlayed = useRef("");
   const waitingForVoice = playing && !audioSrc(scene?.audio_url);
@@ -232,16 +247,14 @@ export function LessonPlayer({
         lockedDuration = audio.duration;
         setClipDuration(audio.duration);
       }
-      if (audio && Number.isFinite(audio.currentTime)) {
-        setCurrentTime(audio.currentTime);
-      }
       const cues = buildCues(scene, lockedDuration);
       let time = 0;
-      if (audio && !audio.paused && Number.isFinite(audio.currentTime)) {
+      if (audio && !audio.paused && Number.isFinite(audio.currentTime) && audio.currentTime > 0.05) {
         time = audio.currentTime;
       } else {
         time = ((Date.now() - speechStarted) / 1000) * rate;
       }
+      setCurrentTime(time);
       const cue = cueAt(cues, time);
       if (cue) {
         setCaption(cue.text);
@@ -369,26 +382,91 @@ export function LessonPlayer({
     }
   }
 
+  async function makeThumbnail() {
+    setThumbBusy(true);
+    try {
+      const payload = await generateThumbnail(lesson.lesson_id);
+      setThumbUrl(payload.lesson.thumbnail_url || "");
+    } catch (err) {
+      setExportLabel(err instanceof Error ? err.message : "Could not generate a thumbnail");
+    } finally {
+      setThumbBusy(false);
+    }
+  }
+
+  async function makeReelVideo() {
+    setExporting(true);
+    setExportLabel("Recording 9:16 reel…");
+    setPlaying(false);
+    audioRef.current?.pause();
+    window.speechSynthesis?.cancel();
+    try {
+      const blob = await exportReelVideo(
+        { ...lesson, thumbnail_url: thumbUrl || lesson.thumbnail_url },
+        (progress) => setExportLabel(`Scene ${progress.scene}/${progress.total} · ${progress.label}`),
+      );
+      setVideoBlob(blob);
+      setExportLabel("Reel ready — download it");
+      downloadBlob(blob, `${safeReelName(lesson.topic)}.${fileExtension(blob)}`);
+    } catch (err) {
+      setExportLabel(err instanceof Error ? err.message : "Could not generate the reel video");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   if (!scene) return null;
 
   const isReel = lesson.format === "reel";
-  const reelTotal = Math.round(scenes.reduce((sum, item) => sum + (item.duration || 0), 0));
+  const spokenLabel =
+    SPOKEN_LANGUAGES.find((item) => item.id === (lesson.spoken_language || "en"))?.label || "English";
 
   return (
-    <div className={cn("grid min-h-[calc(100vh-6rem)] gap-4", isReel ? "grid-rows-[auto_auto_1fr]" : "grid-rows-[auto_1fr_auto_auto]")}>
+    <div
+      className={cn(
+        isReel
+          ? "flex h-[calc(100dvh-3.25rem)] flex-col gap-2 overflow-hidden"
+          : "grid min-h-[calc(100vh-6rem)] grid-rows-[auto_1fr_auto_auto] gap-4",
+      )}
+    >
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-amber-200/80">
-            {isReel ? `30s short · ${reelTotal}s` : `Scene ${index + 1} of ${scenes.length}`} · {scene.type}
+            {isReel
+              ? `${spokenLabel} · ${lesson.language} · ${lesson.topic}`
+              : `Scene ${index + 1} of ${scenes.length} · ${scene.type}`}
           </p>
-          <h1 className="text-2xl font-semibold text-white">{lesson.title}</h1>
+          <h1 className={cn("font-semibold text-white", isReel ? "text-xl" : "text-2xl")}>{isReel ? lesson.topic : lesson.title}</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={() => void runStudentCode()} disabled={runBusy}>
-            <TerminalSquare className="h-4 w-4" /> {runBusy ? "Running…" : "Run code"}
-          </Button>
+          {isReel ? (
+            <>
+              <Button size="sm" variant="outline" onClick={() => void makeThumbnail()} disabled={thumbBusy}>
+                <ImageIcon className="h-4 w-4" /> {thumbBusy ? "Thumbnail…" : "Thumbnail"}
+              </Button>
+              <Button size="sm" onClick={() => void makeReelVideo()} disabled={exporting}>
+                <Film className="h-4 w-4" /> {exporting ? "Generating…" : "Generate video"}
+              </Button>
+              {videoBlob ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => downloadBlob(videoBlob, `${safeReelName(lesson.topic)}.${fileExtension(videoBlob)}`)}
+                >
+                  <Download className="h-4 w-4" /> Download
+                </Button>
+              ) : null}
+            </>
+          ) : (
+            <Button size="sm" onClick={() => void runStudentCode()} disabled={runBusy}>
+              <TerminalSquare className="h-4 w-4" /> {runBusy ? "Running…" : "Run code"}
+            </Button>
+          )}
         </div>
       </header>
+      {isReel && exportLabel ? (
+        <p className="-mt-2 text-xs text-zinc-400">{exportLabel}</p>
+      ) : null}
 
       <PlayerTransport
         scenes={scenes}
@@ -397,6 +475,7 @@ export function LessonPlayer({
         duration={clipDuration || scene.duration || 8}
         playing={playing}
         rate={rate}
+        compact={isReel}
         onPlayPause={() => {
           if (playing) {
             setPlaying(false);
@@ -427,10 +506,13 @@ export function LessonPlayer({
         <button
           type="button"
           onClick={startVoice}
-          className="flex items-center justify-center gap-2 rounded-xl border border-amber-300/40 bg-amber-400 px-4 py-3 text-sm font-semibold text-zinc-950"
+          className={cn(
+            "flex items-center justify-center gap-2 rounded-xl border border-amber-300/40 bg-amber-400 text-sm font-semibold text-zinc-950",
+            isReel ? "px-3 py-2" : "px-4 py-3",
+          )}
         >
           <Volume2 className="h-4 w-4" />
-          Click to hear Byte — uses Google Cloud Chirp, not the browser voice
+          {isReel ? "Tap to play Byte’s voice" : "Click to hear Byte — uses Google Cloud Chirp, not the browser voice"}
         </button>
       ) : null}
 
@@ -447,48 +529,21 @@ export function LessonPlayer({
       ) : null}
 
       {isReel ? (
-        <div className="mx-auto flex w-full justify-center">
-          <div className="reel-frame relative flex h-[min(68vh,640px)] w-auto max-w-full aspect-[9/16] flex-col overflow-hidden rounded-[2rem] border border-white/15 bg-zinc-950 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
-            <div className="flex items-center justify-between px-4 pt-4">
-              <TutorAvatar expression={expression} speaking={playing} gesture="point_right" className="items-start [&_svg]:h-16 [&_svg]:w-16" />
-              <span className="rounded-full bg-amber-400 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-950">
-                30s
-              </span>
-            </div>
-            <div className="min-h-0 flex-1 px-3 py-2">
-              <CodeWorkbench
-                compact
-                code={code}
-                language={lesson.language}
-                filename={scene.filename || sourceFilename(lesson.language)}
-                highlight={highlight}
-                onChange={setCode}
-              />
-            </div>
-            {scene.type === "execution" || scene.type === "terminal" || runOutput.length || runError ? (
-              <div className="px-3">
-                <Terminal
-                  command={scene.command || runCommand(lesson.language)}
-                  lines={terminalLines}
-                  stderr={runError || scene.stderr}
-                  success={!runError}
-                />
-              </div>
-            ) : null}
-            <div className="mt-auto bg-gradient-to-t from-black via-black/80 to-transparent px-5 pb-6 pt-16">
-              <p className="text-base font-medium leading-6 text-white">{caption}</p>
-              {highlight?.label ? (
-                <p className="mt-2 text-[10px] uppercase tracking-[0.25em] text-amber-300">{highlight.label}</p>
-              ) : null}
-              {scene.type === "summary" && scene.takeaways?.length ? (
-                <ul className="mt-3 space-y-1 text-sm text-amber-100">
-                  {scene.takeaways.map((item) => (
-                    <li key={item}>• {item}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          </div>
+        <div className="mx-auto flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden">
+          <ReelStage
+            lesson={{ ...lesson, thumbnail_url: thumbUrl || lesson.thumbnail_url }}
+            scene={scene}
+            code={code}
+            caption={caption}
+            highlight={highlight}
+            playing={playing}
+            currentTime={currentTime}
+            duration={clipDuration || scene.duration || 8}
+            terminalLines={terminalLines}
+            runError={runError}
+            iterations={iterations}
+            stepIndex={stepIndex}
+          />
         </div>
       ) : (
         <>
@@ -609,4 +664,9 @@ function primaryCode(lesson: Lesson): string {
   return (
     preferred?.code || defaultCode(lesson.language)
   );
+}
+
+function safeReelName(topic: string): string {
+  const slug = topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `reel-${slug || "short"}`;
 }

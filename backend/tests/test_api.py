@@ -47,6 +47,24 @@ def test_create_lesson_queues_job() -> None:
     assert lesson.status_code == 200
 
 
+def test_create_lesson_accepts_hindi_spoken_language() -> None:
+    response = client.post(
+        "/api/v1/tutor/lesson",
+        json={
+            "topic": "for loop",
+            "language": "java",
+            "level": "beginner",
+            "format": "reel",
+            "spoken_language": "hindi",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    lesson = client.get(f"/api/v1/lesson/{body['lesson_id']}")
+    assert lesson.status_code == 200
+    assert lesson.json()["lesson"]["spoken_language"] == "hi"
+
+
 def test_create_reel_queues_job() -> None:
     response = client.post(
         "/api/v1/tutor/lesson",

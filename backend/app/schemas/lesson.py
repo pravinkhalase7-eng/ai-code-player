@@ -5,6 +5,8 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.services.locale import normalize_spoken_language
+
 
 class LessonLevel(str, Enum):
     beginner = "beginner"
@@ -201,6 +203,7 @@ class LessonObjective(BaseModel):
 
 class TutorPlan(BaseModel):
     language: str = Field(min_length=1, max_length=32)
+    spoken_language: str = "en"
     level: LessonLevel = LessonLevel.beginner
     format: LessonFormat = LessonFormat.lesson
     topic: str = Field(min_length=1, max_length=200)
@@ -210,11 +213,17 @@ class TutorPlan(BaseModel):
     concepts: list[str] = Field(min_length=1, max_length=12)
     greeting: str = Field(min_length=1, max_length=400)
 
+    @field_validator("spoken_language")
+    @classmethod
+    def _spoken(cls, value: str) -> str:
+        return normalize_spoken_language(value)
+
 
 class Lesson(BaseModel):
     lesson_id: str = Field(min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=160)
     language: str = Field(min_length=1, max_length=32)
+    spoken_language: str = "en"
     level: LessonLevel = LessonLevel.beginner
     format: LessonFormat = LessonFormat.lesson
     topic: str = Field(min_length=1, max_length=200)
@@ -222,11 +231,24 @@ class Lesson(BaseModel):
     concepts: list[str] = Field(default_factory=list)
     scenes: list[LessonScene] = Field(min_length=3, max_length=24)
     code_examples: list[str] = Field(default_factory=list)
+    thumbnail_url: str | None = None
 
     @field_validator("language")
     @classmethod
     def _lang(cls, value: str) -> str:
         return value.strip().lower()
+
+    @field_validator("spoken_language")
+    @classmethod
+    def _spoken(cls, value: str) -> str:
+        return normalize_spoken_language(value)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _copy_code_forward(cls, data: object) -> object:
+        if isinstance(data, dict):
+            return fill_empty_scene_code(data)
+        return data
 
     @model_validator(mode="after")
     def _required_scene_types(self) -> Lesson:
@@ -270,16 +292,68 @@ class LessonDraft(BaseModel):
     lesson_id: str = Field(min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=160)
     language: str = Field(min_length=1, max_length=32)
+    spoken_language: str = "en"
     level: LessonLevel = LessonLevel.beginner
     format: LessonFormat = LessonFormat.lesson
     topic: str = Field(min_length=1, max_length=200)
     objectives: list[str] = Field(min_length=1, max_length=8)
     concepts: list[str] = Field(default_factory=list)
     scenes: list[GenericScene] = Field(min_length=3, max_length=24)
+    thumbnail_url: str | None = None
+
+    @field_validator("spoken_language")
+    @classmethod
+    def _spoken(cls, value: str) -> str:
+        return normalize_spoken_language(value)
+
+
+def fallback_example_code(language: str) -> str:
+    lang = (language or "java").strip().lower()
+    if lang == "python":
+        return "for i in range(3):\n    print(i)\n"
+    if lang in {"javascript", "js"}:
+        return "for (let i = 0; i < 3; i++) {\n  console.log(i);\n}\n"
+    return (
+        "public class Main {\n"
+        "    public static void main(String[] args) {\n"
+        "        System.out.println(\"Hello\");\n"
+        "    }\n"
+        "}\n"
+    )
+
+
+def fill_empty_scene_code(data: dict) -> dict:
+    data = dict(data)
+    scenes = [dict(scene) if isinstance(scene, dict) else scene for scene in (data.get("scenes") or [])]
+    data["scenes"] = scenes
+    last_code = ""
+    last_language = str(data.get("language") or "java")
+    last_filename = ""
+    examples = data.get("code_examples") or []
+    if examples and isinstance(examples[0], str) and examples[0].strip():
+        last_code = examples[0]
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        code = str(scene.get("code") or "").strip()
+        if code:
+            last_code = scene["code"]
+            if scene.get("language"):
+                last_language = str(scene["language"])
+            if scene.get("filename"):
+                last_filename = str(scene["filename"])
+            continue
+        if scene.get("type") not in {"code", "execution"}:
+            continue
+        scene["code"] = last_code or fallback_example_code(str(scene.get("language") or last_language))
+        scene.setdefault("language", last_language)
+        if last_filename:
+            scene.setdefault("filename", last_filename)
+    return data
 
 
 def lesson_from_draft(draft: LessonDraft) -> Lesson:
-    data = draft.model_dump(mode="json")
+    data = fill_empty_scene_code(draft.model_dump(mode="json"))
     types = {scene.get("type") for scene in data.get("scenes", [])}
     if data.get("format") != "reel" and "quiz" not in types and {"intro", "code", "summary"} <= types:
         data["format"] = "reel"
@@ -293,6 +367,10 @@ class ChatReply(BaseModel):
     should_execute: bool = False
     code: str | None = None
     language: str | None = None
+
+
+class TranslatedLines(BaseModel):
+    lines: list[str] = Field(min_length=1)
 
 
 class EvaluationResult(BaseModel):

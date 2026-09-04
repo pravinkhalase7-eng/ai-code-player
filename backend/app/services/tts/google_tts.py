@@ -9,6 +9,7 @@ import httpx
 
 from app.config import settings
 from app.errors import AppError
+from app.services.locale import candidate_voices
 from app.services.tts.base import TTSProvider
 
 logger = logging.getLogger(__name__)
@@ -16,13 +17,6 @@ logger = logging.getLogger(__name__)
 TTS_ENDPOINT = "https://texttospeech.googleapis.com/v1/text:synthesize"
 DEFAULT_VOICE = "en-US-Chirp3-HD-Aoede"
 VOICE_RE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}-.+$")
-NATURAL_FALLBACKS = (
-    "en-US-Chirp3-HD-Aoede",
-    "en-US-Chirp3-HD-Kore",
-    "en-US-Chirp3-HD-Leda",
-    "en-US-Journey-F",
-    "en-US-Studio-O",
-)
 # MP3 from Cloud TTS is ~32 kbps and sounds thin. LINEAR16 24 kHz WAV is what Chirp 3 HD is produced at.
 ENCODINGS: tuple[tuple[str, int | None, str], ...] = (
     ("LINEAR16", 24000, ".wav"),
@@ -55,10 +49,7 @@ class GoogleTTS(TTSProvider):
                 missing_keys=["GOOGLE_TTS_API_KEY"],
             )
         requested, _language = resolve_cloud_voice(voice)
-        candidates: list[str] = []
-        for name in (requested, *NATURAL_FALLBACKS):
-            if name not in candidates:
-                candidates.append(name)
+        candidates = candidate_voices(requested)
 
         last_error = "Cloud Text-to-Speech returned no audio."
         for voice_name in candidates:

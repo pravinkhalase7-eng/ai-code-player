@@ -100,6 +100,7 @@ def valid_lesson_payload() -> dict:
 def test_lesson_schema_accepts_for_loop_lesson() -> None:
     lesson = Lesson.model_validate(valid_lesson_payload())
     assert lesson.language == "java"
+    assert lesson.spoken_language == "en"
     assert {scene.type for scene in lesson.scenes} >= {"intro", "code", "quiz"}
 
 
@@ -183,11 +184,93 @@ def test_python_and_js_visualizers() -> None:
     assert [step.output_line for step in js_steps if step.output_line] == ["0", "1", "2"]
 
 
+def test_empty_execution_code_inherits_from_previous_scene() -> None:
+    payload = {
+        "lesson_id": "reel-empty-exec",
+        "title": "30s: Java For Loop",
+        "language": "java",
+        "level": "beginner",
+        "format": "reel",
+        "topic": "for loop",
+        "objectives": ["Hook the concept", "Show a tiny example"],
+        "scenes": [
+            {"id": "hook", "type": "intro", "duration": 6, "narration": "Stop scrolling. Java for loops in 30 seconds."},
+            {
+                "id": "code",
+                "type": "code",
+                "duration": 12,
+                "language": "java",
+                "code": JAVA_FOR,
+                "narration": "i starts at zero, then i plus plus.",
+            },
+            {
+                "id": "run",
+                "type": "execution",
+                "duration": 7,
+                "code": "",
+                "narration": "Watch it print zero through four.",
+            },
+            {
+                "id": "end",
+                "type": "summary",
+                "duration": 5,
+                "narration": "Init, condition, increment. Save this.",
+                "takeaways": ["i++ after the body"],
+            },
+        ],
+    }
+    draft = LessonDraft.model_validate(payload)
+    lesson = lesson_from_draft(draft)
+    execution = next(scene for scene in lesson.scenes if scene.type == "execution")
+    assert execution.code.strip() == JAVA_FOR.strip()
+
+    strict = Lesson.model_validate(payload)
+    execution = next(scene for scene in strict.scenes if scene.type == "execution")
+    assert "for (int i = 0" in execution.code
+
+
 def test_lesson_draft_converts_to_strict_lesson() -> None:
     draft = LessonDraft.model_validate(valid_lesson_payload())
     lesson = lesson_from_draft(draft)
     assert isinstance(lesson, Lesson)
     assert {scene.type for scene in lesson.scenes} >= {"intro", "code", "quiz"}
+
+
+def test_reel_svg_thumbnail_includes_topic(tmp_path) -> None:
+    from app.services.images.thumbnail import write_svg_poster, ensure_reel_thumbnail
+    from app.config import settings
+
+    dest = tmp_path / "poster.svg"
+    write_svg_poster(dest, "Java for loop", "30s: Java For Loop", "java")
+    body = dest.read_text()
+    assert "Java for loop" in body
+    assert "30s SHORT" in body
+
+    original = settings.storage_path
+    original_provider = settings.image_provider
+    settings.storage_path = tmp_path
+    settings.image_provider = "local"
+    try:
+        url = ensure_reel_thumbnail("les_thumb", "Java for loop", "30s: Java For Loop", "java")
+        assert url.endswith(".svg")
+        assert (tmp_path / "images" / "thumb_les_thumb.svg").exists()
+    finally:
+        settings.storage_path = original
+        settings.image_provider = original_provider
+
+
+def test_teaching_text_roundtrip_keeps_code() -> None:
+    from app.agents.orchestrator import gather_teaching_texts, scatter_teaching_texts
+
+    lesson = Lesson.model_validate(valid_lesson_payload())
+    texts = gather_teaching_texts(lesson)
+    translated = [f"HI:{item}" for item in texts]
+    updated = scatter_teaching_texts(lesson, translated)
+    assert updated.title.startswith("HI:")
+    assert updated.scenes[0].narration.startswith("HI:")
+    code_scene = next(scene for scene in updated.scenes if scene.type == "code")
+    original = next(scene for scene in lesson.scenes if scene.type == "code")
+    assert code_scene.code == original.code
 
 
 def test_fit_reel_durations_total_about_30_seconds() -> None:

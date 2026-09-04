@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
     return [
       { source: "/api/v1/:path*", destination: `${API_ORIGIN}/api/v1/:path*` },
       { source: "/audio/:path*", destination: `${API_ORIGIN}/audio/:path*` },
+      { source: "/images/:path*", destination: `${API_ORIGIN}/images/:path*` },
     ];
   },
 };

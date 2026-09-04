@@ -85,24 +85,28 @@ export type Lesson = {
   lesson_id: string;
   title: string;
   language: string;
+  spoken_language?: string;
   level: LessonLevel;
   format?: LessonFormat;
   topic: string;
   objectives: string[];
   concepts?: string[];
   scenes: LessonScene[];
+  thumbnail_url?: string | null;
 };
 
 export type LessonSummary = {
   lesson_id: string;
   title: string;
   language: string;
+  spoken_language?: string;
   level: string;
   format?: LessonFormat;
   status: string;
   completion_percent: number;
   scene_index?: number;
   topic: string;
+  thumbnail_url?: string | null;
 };
 
 export type RunHelp = {

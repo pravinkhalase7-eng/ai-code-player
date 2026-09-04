@@ -4,8 +4,9 @@ import logging
 import re
 
 from app.config import settings
-from app.schemas.lesson import ChatReply, EvaluationResult, Lesson, LessonDraft, LessonFormat, TutorPlan, lesson_from_draft
+from app.schemas.lesson import ChatReply, EvaluationResult, Lesson, LessonDraft, LessonFormat, TranslatedLines, TutorPlan, lesson_from_draft
 from app.services.gemini_client import generate_text, structured_generate
+from app.services.locale import needs_localization, spoken_generation_rules, spoken_locale, uses_spoken_script
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,8 @@ TUTOR_INSTRUCTION = """
 You are the Tutor Agent for an AI Coding Tutor platform.
 Understand the student's request, infer language and skill level, and decide what to teach.
 Return JSON only matching TutorPlan.
-Prefer the language the student selected in the request. Only default to Java if they did not name a language.
+Prefer the programming language the student selected in the request. Only default to Java if they did not name a language.
+Speak and write teaching copy in the requested spoken language. Programming source stays in Java, Python, or JavaScript.
 Teach the topic they asked for. Do not swap it for a different concept.
 If they ask for Java Stream API, plan Stream pipelines (filter, map, collect), not a generic for-loop.
 If they ask for a for loop, plan initialization, condition, increment, body, and execution order.
@@ -26,6 +28,7 @@ Create a complete structured lesson for an interactive visual coding tutor that 
 The lesson MUST include scenes of types: intro, concept, code, execution, terminal, quiz, summary — in that order.
 
 Hard rules:
+- FIRST: write every narration, title, quiz, bullet, and takeaway in the requested spoken_language. English copy is invalid when spoken_language is not en.
 - Teach the plan topic. Do not replace Stream API, recursion, classes, etc. with an unrelated for-loop.
 - Intro narration: 4-6 spoken sentences that name the concept and what the student will be able to do.
 - Concept narration: 6-10 spoken sentences that explain the idea completely, plus 4-6 bullets.
@@ -42,6 +45,7 @@ Hard rules:
 - narration must be spoken teaching, not UI copy. No one-sentence scenes except the quiz prompt.
 - Durations: intro 18-28s, concept 28-45s, code 30-50s, execution 16-28s, terminal 12-20s, quiz 16-24s, summary 16-24s.
 - language must match the tutor plan. Set filename to Main.java, main.py, or main.js to match.
+- spoken_language must match the tutor plan. All narration, quiz text, bullets, takeaways, and titles use that spoken language.
 - lesson_id should be a short slug.
 - format must be "lesson".
 
@@ -100,6 +104,7 @@ Hard rules:
 - Never invent stdout. Never claim the code already ran.
 - format must be "reel".
 - language must match the tutor plan. Set filename to Main.java, main.py, or main.js to match.
+- spoken_language must match the tutor plan. All spoken lines, takeaways, and the title use that spoken language.
 - lesson_id should be a short slug.
 """.strip()
 
@@ -110,6 +115,7 @@ Use Main.java / public class Main for Java, main.py for Python, and main.js for 
 The example MUST demonstrate the requested topic (streams, loops, methods, etc.). Never leave main() empty.
 Never replace a Stream/filter/map example with an unrelated for-loop unless the topic is loops.
 Do not invent stdout. Keep expected_output empty.
+Do not rewrite narration into English. Keep the existing spoken language.
 Return the full Lesson JSON.
 """.strip()
 
@@ -132,6 +138,7 @@ Return the full Lesson JSON.
 CHAT_INSTRUCTION = """
 You are the Tutor Agent answering a follow-up during a live lesson.
 Be concise, visual, and kind.
+Reply in the lesson spoken_language. Keep code snippets in the programming language.
 If the student asks to change or run code, set should_execute true and provide the code.
 Never invent execution output.
 """.strip()
@@ -142,6 +149,7 @@ Score the student's answer against the quiz.
 status must be correct, partially_correct, or incorrect.
 Identify misconceptions and recommend continue, reteach, harder, or practice.
 mastery_delta is between -0.2 and 0.25.
+Write explanation in the lesson spoken_language when that field is present.
 """.strip()
 
 
@@ -221,10 +229,18 @@ def invoke_agent(spec: AgentSpec, user_message: str):
     return result
 
 
-def plan_lesson(topic: str, language: str, level: str, format: str = "lesson") -> TutorPlan:
+def plan_lesson(
+    topic: str,
+    language: str,
+    level: str,
+    format: str = "lesson",
+    spoken_language: str = "en",
+) -> TutorPlan:
     fmt = "reel" if format == "reel" else "lesson"
+    locale = spoken_locale(spoken_language)
     message = (
-        f"Topic: {topic}\nLanguage: {language}\nRequested level: {level}\nFormat: {fmt}\n"
+        f"{spoken_generation_rules(locale.id)}\n"
+        f"Topic: {topic}\nProgramming language: {language}\nRequested level: {level}\nFormat: {fmt}\n"
     )
     if fmt == "reel":
         message += "This is a 30-second catchy short/reel, not a full lesson. Keep the plan tight."
@@ -232,18 +248,22 @@ def plan_lesson(topic: str, language: str, level: str, format: str = "lesson") -
     assert isinstance(plan, TutorPlan)
     if language:
         plan.language = language.lower()
+    plan.spoken_language = locale.id
     plan.format = LessonFormat.reel if fmt == "reel" else LessonFormat.lesson
     return plan
 
 
 def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
+    plan = _localize_plan(plan)
     is_reel = plan.format == LessonFormat.reel
     message = (
+        f"{spoken_generation_rules(plan.spoken_language)}\n"
         f"Create the {'30-second catchy reel' if is_reel else 'lesson'}. Teach THIS topic; do not substitute a different concept.\n"
         f"lesson_id={lesson_id}\n"
         f"title={plan.title}\n"
         f"topic={plan.topic}\n"
         f"language={plan.language}\n"
+        f"spoken_language={plan.spoken_language}\n"
         f"level={plan.level.value}\n"
         f"format={plan.format.value}\n"
         f"objectives={plan.objectives}\n"
@@ -255,6 +275,7 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
     assert isinstance(lesson, Lesson)
     lesson.lesson_id = lesson_id
     lesson.language = plan.language
+    lesson.spoken_language = plan.spoken_language
     lesson.level = plan.level
     lesson.format = LessonFormat.reel if is_reel else LessonFormat.lesson
     lesson.topic = plan.topic
@@ -281,23 +302,29 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
                 empty_main = True
         if scene.type in {"code", "execution"} and re.search(r"main\s*\([^)]*\)\s*\{\s*\}", code):
             empty_main = True
+    spoken_rules = spoken_generation_rules(plan.spoken_language)
     if not has_code or empty_main:
-        lesson = invoke_agent(CODE_AGENT, lesson.model_dump_json())
+        lesson = invoke_agent(CODE_AGENT, f"{spoken_rules}\n{lesson.model_dump_json()}")
         assert isinstance(lesson, Lesson)
+        lesson.spoken_language = plan.spoken_language
     has_highlights = any(
         getattr(scene, "highlight_ranges", None) for scene in lesson.scenes if scene.type == "code"
     )
     if not has_highlights:
-        lesson = invoke_agent(VISUAL_AGENT, lesson.model_dump_json())
+        lesson = invoke_agent(VISUAL_AGENT, f"{spoken_rules}\n{lesson.model_dump_json()}")
         assert isinstance(lesson, Lesson)
+        lesson.spoken_language = plan.spoken_language
     has_quiz = any(scene.type == "quiz" for scene in lesson.scenes)
     if not has_quiz and lesson.format != LessonFormat.reel:
-        lesson = invoke_agent(QUIZ_AGENT, lesson.model_dump_json())
+        lesson = invoke_agent(QUIZ_AGENT, f"{spoken_rules}\n{lesson.model_dump_json()}")
         assert isinstance(lesson, Lesson)
+        lesson.spoken_language = plan.spoken_language
     lesson.lesson_id = lesson_id
     lesson.format = plan.format
+    lesson.spoken_language = plan.spoken_language
     if lesson.format == LessonFormat.reel:
         lesson = _normalize_reel(lesson)
+    lesson = _localize_lesson(lesson)
     return _fit_scene_durations(lesson)
 
 
@@ -307,13 +334,14 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
     allowed = {"intro", "code", "execution", "terminal", "summary"}
     scenes = [scene for scene in lesson.scenes if scene.type in allowed]
     types = {scene.type for scene in scenes}
+    locale = spoken_locale(lesson.spoken_language)
     if "intro" not in types:
         scenes.insert(
             0,
             IntroScene(
                 id="scene_reel_hook",
                 duration=6,
-                narration=f"Stop scrolling. Here is {lesson.topic} in 30 seconds.",
+                narration=locale.reel_hook.format(topic=lesson.topic),
             ),
         )
     if "summary" not in types:
@@ -321,11 +349,131 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
             SummaryScene(
                 id="scene_reel_end",
                 duration=5,
-                narration="That's the trick. Save this and try it in your own file.",
+                narration=locale.reel_end,
                 takeaways=["Try it yourself", lesson.topic],
             ),
         )
     return lesson.model_copy(update={"format": LessonFormat.reel, "scenes": scenes})
+
+
+def gather_teaching_texts(lesson: Lesson) -> list[str]:
+    texts = [lesson.title, *list(lesson.objectives)]
+    for scene in lesson.scenes:
+        texts.append(scene.narration)
+        texts.extend(segment.text for segment in scene.segments)
+        texts.extend(list(getattr(scene, "bullets", None) or []))
+        texts.extend(list(getattr(scene, "takeaways", None) or []))
+        question = getattr(scene, "question", None)
+        if question:
+            texts.append(str(question))
+        texts.extend(list(getattr(scene, "options", None) or []))
+        explanation = getattr(scene, "explanation", None)
+        if explanation:
+            texts.append(str(explanation))
+    return texts
+
+
+def scatter_teaching_texts(lesson: Lesson, texts: list[str]) -> Lesson:
+    expected = gather_teaching_texts(lesson)
+    if len(texts) != len(expected):
+        raise ValueError(f"translated line count {len(texts)} != {len(expected)}")
+    cursor = iter(texts)
+    title = next(cursor)[:160]
+    objectives = [next(cursor)[:200] for _ in lesson.objectives]
+    scenes = []
+    for scene in lesson.scenes:
+        updates: dict[str, object] = {
+            "narration": next(cursor)[:2000],
+            "segments": [segment.model_copy(update={"text": next(cursor)}) for segment in scene.segments],
+        }
+        bullets = getattr(scene, "bullets", None)
+        if bullets:
+            updates["bullets"] = [next(cursor) for _ in bullets]
+        takeaways = getattr(scene, "takeaways", None)
+        if takeaways:
+            updates["takeaways"] = [next(cursor) for _ in takeaways]
+        question = getattr(scene, "question", None)
+        if question:
+            updates["question"] = next(cursor)
+        options = getattr(scene, "options", None)
+        if options:
+            updates["options"] = [next(cursor) for _ in options]
+        explanation = getattr(scene, "explanation", None)
+        if explanation:
+            updates["explanation"] = next(cursor)
+        scenes.append(scene.model_copy(update=updates))
+    return lesson.model_copy(update={"title": title, "objectives": objectives, "scenes": scenes})
+
+
+def _translate_lines(lines: list[str], spoken_language: str) -> list[str]:
+    locale = spoken_locale(spoken_language)
+    numbered = "\n".join(f"{index}. {line}" for index, line in enumerate(lines))
+    instruction = (
+        f"Translate every numbered line into {locale.english_name} using {locale.native_label} script.\n"
+        f"Return JSON {{\"lines\": [...]}} with EXACTLY {len(lines)} strings in the same order.\n"
+        "Keep programming tokens (for, if, i++, System.out.println, class names) in English.\n"
+        "Do not add or drop lines. Do not answer in English prose."
+    )
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            drafted = structured_generate(
+                instruction if attempt == 0 else instruction + "\nPrevious output had the wrong line count or was still English.",
+                numbered,
+                TranslatedLines,
+                temperature=0.1,
+                label="localize_lines",
+            )
+            assert isinstance(drafted, TranslatedLines)
+            if len(drafted.lines) != len(lines):
+                last_error = ValueError(f"count {len(drafted.lines)}")
+                continue
+            return [item if item.strip() else original for item, original in zip(drafted.lines, lines, strict=True)]
+        except Exception as exc:
+            last_error = exc
+            logger.warning("line translation attempt %s failed: %s", attempt + 1, exc)
+    raise last_error or RuntimeError("line translation failed")
+
+
+def _localize_plan(plan: TutorPlan) -> TutorPlan:
+    locale = spoken_locale(plan.spoken_language)
+    if locale.id == "en":
+        return plan
+    blob = " ".join([plan.title, plan.greeting, *plan.objectives, *plan.concepts])
+    if uses_spoken_script(blob, locale.id):
+        return plan
+    try:
+        lines = [plan.title, plan.greeting, *plan.objectives, *plan.concepts]
+        translated = _translate_lines(lines, locale.id)
+        title, greeting, *rest = translated
+        objectives = rest[: len(plan.objectives)]
+        concepts = rest[len(plan.objectives) :]
+        return plan.model_copy(
+            update={
+                "title": title[:160],
+                "greeting": greeting[:400],
+                "objectives": [item[:200] for item in objectives],
+                "concepts": [item[:120] for item in concepts],
+            }
+        )
+    except Exception:
+        logger.exception("plan localization failed")
+        return plan
+
+
+def _localize_lesson(lesson: Lesson) -> Lesson:
+    locale = spoken_locale(lesson.spoken_language)
+    if locale.id == "en" or not needs_localization(lesson, locale.id):
+        return lesson
+    try:
+        texts = gather_teaching_texts(lesson)
+        translated = _translate_lines(texts, locale.id)
+        localized = scatter_teaching_texts(lesson, translated)
+        localized.spoken_language = locale.id
+        return localized
+    except Exception:
+        logger.exception("localization failed for %s", lesson.lesson_id)
+        return lesson
 
 
 def _fit_scene_durations(lesson: Lesson) -> Lesson:

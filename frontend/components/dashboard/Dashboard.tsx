@@ -8,6 +8,14 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { createLesson, getHealth, listLessons } from "@/lib/api";
 import { LANGUAGES, topicForLanguage, type LessonLanguage } from "@/lib/language";
+import {
+  SPOKEN_LANGUAGES,
+  readStoredFormat,
+  readStoredSpokenLanguage,
+  storeFormat,
+  storeSpokenLanguage,
+  type SpokenLanguage,
+} from "@/lib/spokenLanguage";
 import { cn } from "@/lib/utils";
 import type { LessonFormat, LessonSummary } from "@/types/lesson";
 
@@ -15,6 +23,7 @@ export function Dashboard() {
   const router = useRouter();
   const [topic, setTopic] = useState("Explain Java for loop");
   const [language, setLanguage] = useState<LessonLanguage>("java");
+  const [spokenLanguage, setSpokenLanguage] = useState<SpokenLanguage>("en");
   const [format, setFormat] = useState<LessonFormat>("lesson");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -22,6 +31,8 @@ export function Dashboard() {
   const [health, setHealth] = useState<string>("");
 
   useEffect(() => {
+    setSpokenLanguage(readStoredSpokenLanguage());
+    setFormat(readStoredFormat());
     void listLessons()
       .then((payload) => setLessons(payload.lessons))
       .catch(() => undefined);
@@ -40,7 +51,9 @@ export function Dashboard() {
     setBusy(true);
     setError("");
     try {
-      const created = await createLesson(topic || "for loop", language, "beginner", format);
+      storeSpokenLanguage(spokenLanguage);
+      storeFormat(format);
+      const created = await createLesson(topic || "for loop", language, "beginner", format, spokenLanguage);
       router.push(`/learn/${created.lesson_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the lesson");
@@ -64,6 +77,7 @@ export function Dashboard() {
 
       <Card className="p-6 md:p-8">
         <p className="mb-3 text-sm font-medium text-zinc-300">What do you want to learn?</p>
+        <p className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Code</p>
         <div className="mb-4 flex flex-wrap gap-2">
           {LANGUAGES.map((item) => (
             <button
@@ -84,6 +98,31 @@ export function Dashboard() {
             </button>
           ))}
         </div>
+        <p className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Teach in</p>
+        <div className="mb-4 flex flex-wrap gap-2">
+          {SPOKEN_LANGUAGES.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              aria-pressed={spokenLanguage === item.id}
+              onClick={() => {
+                setSpokenLanguage(item.id);
+                storeSpokenLanguage(item.id);
+              }}
+              className={cn(
+                "rounded-full border px-4 py-1.5 text-sm transition",
+                spokenLanguage === item.id
+                  ? "border-sky-300/60 bg-sky-400 text-zinc-950"
+                  : "border-white/10 bg-white/5 text-zinc-300 hover:border-sky-300/30",
+              )}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <p className="mb-4 text-xs text-zinc-500">
+          Byte will teach in {SPOKEN_LANGUAGES.find((item) => item.id === spokenLanguage)?.label}.
+        </p>
         <div className="mb-4 grid gap-2 sm:grid-cols-2">
           {(
             [
@@ -95,7 +134,10 @@ export function Dashboard() {
               key={item.id}
               type="button"
               aria-pressed={format === item.id}
-              onClick={() => setFormat(item.id)}
+              onClick={() => {
+                setFormat(item.id);
+                storeFormat(item.id);
+              }}
               className={cn(
                 "rounded-2xl border px-4 py-3 text-left transition",
                 format === item.id
@@ -141,11 +183,23 @@ export function Dashboard() {
                   onClick={() => router.push(`/learn/${lesson.lesson_id}`)}
                   className="text-left"
                 >
-                  <Card className="p-5 transition hover:border-amber-300/30">
+                  <Card className="overflow-hidden p-0 transition hover:border-amber-300/30">
+                    {lesson.format === "reel" && lesson.thumbnail_url ? (
+                      <div className="relative h-28 w-full overflow-hidden bg-zinc-900">
+                        <img src={lesson.thumbnail_url} alt="" className="h-full w-full object-cover" />
+                        <span className="absolute left-3 top-3 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-950">
+                          30s
+                        </span>
+                      </div>
+                    ) : null}
+                    <div className="p-5">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="font-semibold text-white">{lesson.title}</p>
+                      <p className="font-semibold text-white">{lesson.format === "reel" ? lesson.topic : lesson.title}</p>
                       <span className="text-xs uppercase text-amber-200">
                         {lesson.format === "reel" ? "30s short" : lesson.status === "ready" ? lesson.language : lesson.status}
+                        {lesson.spoken_language && lesson.spoken_language !== "en"
+                          ? ` · ${lesson.spoken_language}`
+                          : ""}
                       </span>
                     </div>
                     <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
@@ -161,6 +215,7 @@ export function Dashboard() {
                           ? `Resume at scene ${scene} · ${Math.round(lesson.completion_percent)}%`
                           : "Start this lesson"}
                     </p>
+                    </div>
                   </Card>
                 </button>
               );

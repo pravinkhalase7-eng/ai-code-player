@@ -23,10 +23,11 @@ export function createLesson(
   language = "java",
   level = "beginner",
   format: "lesson" | "reel" = "lesson",
+  spokenLanguage = "en",
 ) {
   return request<{ lesson_id: string; status: string; job_id: string }>(
     "/api/v1/tutor/lesson",
-    { method: "POST", body: JSON.stringify({ topic, language, level, format }) },
+    { method: "POST", body: JSON.stringify({ topic, language, level, format, spoken_language: spokenLanguage }) },
   );
 }
 
@@ -142,6 +143,13 @@ export function getHealth() {
     code_runner: string;
     missing_keys: string[];
   }>("/api/v1/health");
+}
+
+export function generateThumbnail(lessonId: string) {
+  return request<{ lesson: Lesson; status: string; warnings: string[] }>(
+    `/api/v1/lesson/${lessonId}/thumbnail`,
+    { method: "POST" },
+  );
 }
 
 export function startRender(lessonId: string) {

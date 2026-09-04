@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.errors import AppError
 from app.services.gemini_client import structured_generate
+from app.services.locale import spoken_generation_rules
 from app.services.visualizer import normalize_language, source_filename
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ def explain_run_error(
     compile_error: bool,
     timed_out: bool,
     topic: str = "",
+    spoken_language: str = "en",
 ) -> RunHelp:
     fallback = _fallback_help(language, stderr, compile_error, timed_out)
     filename = source_filename(language)
@@ -96,7 +98,8 @@ def explain_run_error(
                 "You are Byte, a visual coding tutor sitting next to the student.\n"
                 "They clicked Run and it failed. Explain the REAL error in 2-4 short spoken sentences.\n"
                 "Point at the exact line. If you can fix it confidently, return the full corrected source.\n"
-                "Do not invent a different program. Keep the student's approach."
+                "Do not invent a different program. Keep the student's approach.\n"
+                f"{spoken_generation_rules(spoken_language)}"
             ),
             (
                 f"Language: {language}\n"

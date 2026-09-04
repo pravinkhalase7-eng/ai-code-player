@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 168" width="128" height="168" fill="none">
+  <circle cx="64" cy="12" r="6" fill="#22d3ee"/>
+  <rect x="62" y="16" width="4" height="14" rx="2" fill="#a1a1aa"/>
+  <rect x="22" y="48" width="12" height="22" rx="6" fill="#f59e0b"/>
+  <rect x="94" y="48" width="12" height="22" rx="6" fill="#f59e0b"/>
+  <rect x="28" y="28" width="72" height="68" rx="24" fill="#fbbf24"/>
+  <rect x="36" y="46" width="56" height="30" rx="12" fill="#0f172a"/>
+  <rect x="44" y="54" width="16" height="8" rx="3" fill="#22d3ee"/>
+  <rect x="68" y="54" width="16" height="8" rx="3" fill="#22d3ee"/>
+  <path d="M50 68h28" stroke="#22d3ee" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M38 94c8 8 18 12 26 12s18-4 26-12l14 54H24L38 94Z" fill="#27272a"/>
+  <path d="M50 108c8 6 20 6 28 0v44H50V108Z" fill="#3f3f46"/>
+  <circle cx="64" cy="132" r="11" fill="#fbbf24"/>
+  <path d="M59 136V128h4.2c3.4 0 5.4 1.5 5.4 4s-2 4-5.4 4H59Zm3.2-2.4h1c1.3 0 2.1-.6 2.1-1.6s-.8-1.6-2.1-1.6h-1v3.2Z" fill="#18181b"/>
+</svg>

@@ -28,6 +28,7 @@ from app.agents.orchestrator import generate_structured_lesson, plan_lesson
 from app.db import SessionLocal
 from app.services.execution.client import execute_in_sandbox
 from app.services.jobs import create_job, enqueue, set_job
+from app.services.locale import spoken_locale, tts_voice_for
 from app.services.tts.base import tts_hash
 from app.services.tts.factory import audio_file_ready, cache_provider_key, synthesize_narration
 from app.services.visualizer import extract_primary_code, run_command, source_filename, visualize_execution
@@ -53,10 +54,12 @@ def queue_lesson(
     level: str,
     user_id: str | None,
     format: str = "lesson",
+    spoken_language: str = "en",
 ) -> tuple[str, str]:
     uid = ensure_user(db, user_id)
     lesson_id = new_id("les_")
     fmt = "reel" if format == "reel" else "lesson"
+    spoken = spoken_locale(spoken_language).id
     title = f"30s: {topic.title()}" if fmt == "reel" else topic.title()
     row = LessonRow(
         id=lesson_id,
@@ -66,7 +69,7 @@ def queue_lesson(
         level=level,
         topic=topic,
         status="queued",
-        lesson_json={"format": fmt},
+        lesson_json={"format": fmt, "spoken_language": spoken},
     )
     db.add(row)
     db.commit()
@@ -77,6 +80,7 @@ def queue_lesson(
             "lesson_id": lesson_id,
             "topic": topic,
             "language": language,
+            "spoken_language": spoken,
             "level": level,
             "format": fmt,
             "user_id": uid,
@@ -133,7 +137,7 @@ def _apply_execution(lesson: Lesson, result: ExecuteResult) -> Lesson:
                             scene.narration
                             if result.success
                             else (
-                                "Compilation Error. Let's read the compiler message together."
+                                spoken_locale(lesson.spoken_language).compile_error
                                 if result.compile_error
                                 else scene.narration
                             )
@@ -180,11 +184,14 @@ def generate_lesson_assets(
 ) -> Lesson:
     updated_scenes = []
     remaining = list(lesson.scenes)
+    voice = tts_voice_for(lesson.spoken_language)
     for index, scene in enumerate(lesson.scenes):
         audio_url = scene.audio_url
         if scene.narration.strip():
             try:
-                audio_url, used = synthesize_narration(db, scene.narration, provider_name="google")
+                audio_url, used = synthesize_narration(
+                    db, scene.narration, provider_name="google", voice=voice
+                )
                 if used != "google":
                     warnings.append("Google Cloud narration was unavailable for a scene.")
                     audio_url = audio_url if used != "browser" else scene.audio_url
@@ -199,7 +206,7 @@ def generate_lesson_assets(
 
 
 def lesson_needs_google_audio(lesson: Lesson) -> bool:
-    voice = settings.tts_voice
+    voice = tts_voice_for(lesson.spoken_language)
     speed = settings.tts_speed
     for scene in lesson.scenes:
         expected = tts_hash(scene.narration, voice, speed, cache_provider_key("google"))
@@ -235,7 +242,52 @@ def schedule_google_audio(lesson_id: str) -> None:
     threading.Thread(target=_run, daemon=True, name=f"google-tts-{lesson_id[-8:]}").start()
 
 
-def build_lesson(db: Session, lesson_id: str, topic: str, language: str, level: str, format: str = "lesson") -> Lesson:
+_thumbnail_refreshing: set[str] = set()
+_thumbnail_lock = threading.Lock()
+
+
+def refresh_reel_thumbnail(db: Session, lesson_id: str) -> Lesson:
+    row = db.get(LessonRow, lesson_id)
+    if row is None or not row.lesson_json:
+        raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
+    lesson = Lesson.model_validate(row.lesson_json)
+    from app.services.images.thumbnail import ensure_reel_thumbnail
+
+    url = ensure_reel_thumbnail(lesson.lesson_id, lesson.topic, lesson.title, lesson.language)
+    updated = lesson.model_copy(update={"thumbnail_url": url})
+    persist_lesson(db, row, updated, list(row.warnings or []))
+    return updated
+
+
+def schedule_reel_thumbnail(lesson_id: str) -> None:
+    with _thumbnail_lock:
+        if lesson_id in _thumbnail_refreshing:
+            return
+        _thumbnail_refreshing.add(lesson_id)
+
+    def _run() -> None:
+        db = SessionLocal()
+        try:
+            refresh_reel_thumbnail(db, lesson_id)
+        except Exception:
+            logger.exception("reel thumbnail refresh failed for %s", lesson_id)
+        finally:
+            db.close()
+            with _thumbnail_lock:
+                _thumbnail_refreshing.discard(lesson_id)
+
+    threading.Thread(target=_run, daemon=True, name=f"thumb-{lesson_id[-8:]}").start()
+
+
+def build_lesson(
+    db: Session,
+    lesson_id: str,
+    topic: str,
+    language: str,
+    level: str,
+    format: str = "lesson",
+    spoken_language: str = "en",
+) -> Lesson:
     row = db.get(LessonRow, lesson_id)
     if row is None:
         raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
@@ -243,7 +295,7 @@ def build_lesson(db: Session, lesson_id: str, topic: str, language: str, level: 
     db.commit()
     warnings: list[str] = []
 
-    plan = plan_lesson(topic, language, level, format=format)
+    plan = plan_lesson(topic, language, level, format=format, spoken_language=spoken_language)
     lesson = generate_structured_lesson(plan, lesson_id)
     lesson = _stamp_language(lesson)
 
@@ -286,6 +338,21 @@ def build_lesson(db: Session, lesson_id: str, topic: str, language: str, level: 
         except Exception as exc:
             logger.exception("sandbox failed during lesson build")
             warnings.append(str(exc))
+
+    if lesson.format.value == "reel" and not lesson.thumbnail_url:
+        try:
+            from app.services.images.thumbnail import ensure_reel_thumbnail
+
+            lesson = lesson.model_copy(
+                update={
+                    "thumbnail_url": ensure_reel_thumbnail(
+                        lesson.lesson_id, lesson.topic, lesson.title, lesson.language
+                    )
+                }
+            )
+        except Exception:
+            logger.exception("reel thumbnail failed")
+            warnings.append("Thumbnail is still generating.")
 
     with _audio_refresh_lock:
         _audio_refreshing.add(lesson_id)
@@ -342,12 +409,14 @@ def list_recent_lessons(db: Session, user_id: str) -> list[dict[str, Any]]:
                 "lesson_id": row.id,
                 "title": row.title,
                 "language": row.language,
+                "spoken_language": (row.lesson_json or {}).get("spoken_language") or "en",
                 "level": row.level,
                 "status": row.status,
                 "completion_percent": percent,
                 "scene_index": scene_index,
                 "topic": row.topic,
                 "format": (row.lesson_json or {}).get("format") or "lesson",
+                "thumbnail_url": (row.lesson_json or {}).get("thumbnail_url"),
             }
         )
     return results
