@@ -101,7 +101,7 @@ def hook_narration(text: str, spoken_language: str | None, topic: str, seed: str
 
 
 def speech_text(text: str) -> str:
-    """Strip markdown that TTS engines read aloud, especially backticks."""
+    """Make narration safe for TTS: strip markdown and speak code symbols."""
     cleaned = text or ""
     cleaned = re.sub(r"```[\w+-]*\n?", " ", cleaned)
     cleaned = re.sub(r"`([^`]+)`", r"\1", cleaned)
@@ -109,9 +109,90 @@ def speech_text(text: str) -> str:
     cleaned = re.sub(r"\*\*([^*]+)\*\*", r"\1", cleaned)
     cleaned = re.sub(r"__([^_]+)__", r"\1", cleaned)
     cleaned = re.sub(r"(?<!\w)\*([^*]+)\*(?!\w)", r"\1", cleaned)
+    cleaned = _speakable_code(cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
     cleaned = re.sub(r"\s+([,.!?।;:])", r"\1", cleaned)
     return cleaned.strip()
+
+
+def _clean_type_token(token: str) -> str:
+    return re.sub(r"\s+", " ", (token or "").strip())
+
+
+def _speakable_code(text: str) -> str:
+    """Turn programming punctuation into words TTS will not misread.
+
+    Examples:
+    - List<String> / ArrayList<String> → List of String / ArrayList of String
+    - Map<String, Integer> → Map of String to Integer
+    - list[str] / dict[str, int] → list of str / dict of str to int
+    - String[] → String array
+    - => / -> / == / !=  spoken as words so < > are not leftover comparisons
+    """
+    cleaned = text or ""
+
+    # Multi-char operators first (before we touch angle brackets).
+    ops = (
+        ("===", " equals "),
+        ("!==", " is not "),
+        ("<<=", " "),
+        (">>=", " "),
+        ("==", " equals "),
+        ("!=", " is not "),
+        ("<=", " less or equal "),
+        (">=", " greater or equal "),
+        ("=>", " arrow "),
+        ("->", " returns "),
+        ("::", " "),
+        ("&&", " and "),
+        ("||", " or "),
+    )
+    for src, dest in ops:
+        cleaned = cleaned.replace(src, dest)
+
+    # Java/TS generics and nested generics: Outer<Inner> / Map<A, B>
+    two = re.compile(
+        r"\b([A-Za-z_][\w.]*)\s*<\s*([^<>]+?)\s*,\s*([^<>]+?)\s*>"
+    )
+    one = re.compile(r"\b([A-Za-z_][\w.]*)\s*<\s*([^<>]+?)\s*>")
+    previous = None
+    while previous != cleaned:
+        previous = cleaned
+        cleaned = two.sub(
+            lambda m: f"{m.group(1)} of {_clean_type_token(m.group(2))} to {_clean_type_token(m.group(3))}",
+            cleaned,
+        )
+        cleaned = one.sub(
+            lambda m: f"{m.group(1)} of {_clean_type_token(m.group(2))}",
+            cleaned,
+        )
+
+    # Java/JS array type: String[] / number[]
+    cleaned = re.sub(r"\b([A-Za-z_][\w.]*)\s*\[\s*\]", r"\1 array", cleaned)
+
+    # Python / TS index types: list[str], dict[str, int] — skip numeric indexes like items[0]
+    def _bracket_type(match: re.Match[str]) -> str:
+        name = match.group(1)
+        inner = _clean_type_token(match.group(2))
+        if re.fullmatch(r"\d+", inner):
+            return match.group(0)
+        if "," in inner:
+            left, right = [part.strip() for part in inner.split(",", 1)]
+            return f"{name} of {left} to {right}"
+        return f"{name} of {inner}"
+
+    cleaned = re.sub(
+        r"\b([A-Za-z_][\w.]*)\s*\[\s*([^\[\]]+?)\s*\]",
+        _bracket_type,
+        cleaned,
+    )
+
+    # Any leftover angle brackets (not part of a spoken generic) → silence, not "greater than"
+    cleaned = cleaned.replace("<", " ").replace(">", " ")
+    cleaned = cleaned.replace("{", " ").replace("}", " ")
+    cleaned = re.sub(r"(?<![A-Za-z0-9])\[(?=\s|$)", " ", cleaned)
+    cleaned = re.sub(r"(?<=\s)\](?![A-Za-z0-9])", " ", cleaned)
+    return cleaned
 
 _SPANISH_HINT = re.compile(
     r"[áéíóúñ¿¡]|\b(el|la|los|las|un|una|para|esto|este|código|bucle|aquí)\b",

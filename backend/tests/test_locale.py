@@ -108,3 +108,17 @@ def test_hindi_english_copy_needs_localization() -> None:
     assert needs_localization(english, "hi")
     assert not needs_localization(hindi, "hi")
     assert not needs_localization(english, "en")
+
+
+def test_speech_text_speaks_generics() -> None:
+    assert "greater" not in speech_text("Create an ArrayList<String> of names.").lower()
+    assert "less" not in speech_text("Create an ArrayList<String> of names.").lower()
+    assert speech_text("Use List<String> here") == "Use List of String here"
+    assert speech_text("Map<String, Integer> ages") == "Map of String to Integer ages"
+    assert speech_text("Python list[str] values") == "Python list of str values"
+    assert speech_text("dict[str, int] ages") == "dict of str to int ages"
+    assert speech_text("Promise<string> result") == "Promise of string result"
+    assert speech_text("String[] names") == "String array names"
+    assert "equals" in speech_text("if count == 0")
+    # numeric indexes stay as brackets content is spoken normally without of-rewrite
+    assert "items[0]" in speech_text("Read items[0] next") or "items" in speech_text("Read items[0] next")

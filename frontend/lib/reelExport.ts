@@ -79,29 +79,14 @@ async function loadWatermark(): Promise<HTMLCanvasElement | null> {
   canvas.height = image.height;
   const ink = canvas.getContext("2d");
   if (!ink) return null;
+  // Logo is already a transparent PNG — keep white wordmark pixels intact.
   ink.drawImage(image, 0, 0);
-  const pixels = ink.getImageData(0, 0, canvas.width, canvas.height);
-  const data = pixels.data;
-  for (let index = 0; index < data.length; index += 4) {
-    const r = data[index];
-    const g = data[index + 1];
-    const b = data[index + 2];
-    const white = r > 248 && g > 248 && b > 248;
-    const nearWhite = r > 220 && g > 220 && b > 220;
-    if (white) {
-      data[index + 3] = 0;
-    } else if (nearWhite) {
-      const fade = (Math.min(r, g, b) - 220) / 28;
-      data[index + 3] = Math.round(data[index + 3] * (1 - fade));
-    }
-  }
-  ink.putImageData(pixels, 0, 0);
   return canvas;
 }
 
 function drawWatermark(ctx: CanvasRenderingContext2D, mark: HTMLCanvasElement | null) {
   if (!mark) return;
-  const width = 96;
+  const width = 112;
   const height = width * (mark.height / Math.max(1, mark.width));
   const x = WIDTH - width - 20;
   const y = 48;

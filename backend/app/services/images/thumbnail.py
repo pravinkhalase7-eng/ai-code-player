@@ -59,7 +59,7 @@ CODE_LINES = {
 }
 
 _MONO = "Menlo, Consolas, Monaco, ui-monospace, monospace"
-THUMB_VERSION = "title-v4-en"
+THUMB_VERSION = "code-v5-complete"
 
 
 def images_dir() -> Path:
@@ -93,28 +93,83 @@ def _normalize_lang(language: str) -> str:
     return lang
 
 
-def _preview_lines(language: str, source: str | None) -> list[str]:
-    fallback = CODE_LINES.get(language, CODE_LINES["java"])
+def _preview_lines(language: str, source: str | None, max_lines: int = 10) -> list[str]:
+    """Pick a complete-looking snippet. Empty source → no fake stub program."""
     raw = (source or "").replace("\t", "    ")
     if not raw.strip():
-        return fallback
-    rows: list[str] = []
-    for line in raw.splitlines():
-        if not line.strip():
+        return []
+    rows = [line.rstrip() for line in raw.splitlines() if line.strip()]
+    if not rows:
+        return []
+    return _complete_snippet(rows, max_lines=max_lines)
+
+
+def _complete_snippet(rows: list[str], max_lines: int = 10) -> list[str]:
+    if len(rows) <= max_lines:
+        return _balance_display(rows)
+
+    starts = [0]
+    for index, line in enumerate(rows):
+        low = line.lstrip().casefold()
+        if any(
+            token in low
+            for token in (
+                "void main",
+                "public static",
+                "def ",
+                "function ",
+                "const ",
+                "let ",
+                "for ",
+                "while ",
+                "class ",
+                "async ",
+            )
+        ):
+            starts.append(index)
+
+    best = rows[:max_lines]
+    best_score = -10_000
+    for start in starts:
+        window = rows[start : start + max_lines]
+        if len(window) < 3 and start != 0:
             continue
-        rows.append(line.rstrip())
-        if len(rows) >= 8:
-            break
-    return rows or fallback
+        opens = sum(line.count("{") for line in window)
+        closes = sum(line.count("}") for line in window)
+        last = window[-1].strip()
+        ends_complete = last in {"}", "};", "})", "main()", "run();"} or last.startswith("}")
+        score = min(opens, closes) * 3 - abs(opens - closes) * 2
+        score += 12 if ends_complete else 0
+        score += sum(1 for line in window if len(line.strip()) > 10)
+        # Prefer windows that include a body line (indent) not only signatures.
+        score += sum(2 for line in window if line.startswith((" ", "\t")) and "{" not in line)
+        if score > best_score:
+            best_score = score
+            best = window
+    return _balance_display(best)
 
 
-def _format_code_row(line: str, max_chars: int = 36) -> str:
+def _balance_display(rows: list[str]) -> list[str]:
+    """Close open braces so the poster never looks like a chopped method."""
+    depth = 0
+    for line in rows:
+        depth += line.count("{") - line.count("}")
+    out = list(rows)
+    while depth > 0 and len(out) < 14:
+        indent = "    " * max(0, depth - 1)
+        out.append(f"{indent}}}")
+        depth -= 1
+    return out
+
+
+def _format_code_row(line: str, max_chars: int = 48) -> str:
     expanded = (line or "").replace("\t", "    ").rstrip()
     leading = len(expanded) - len(expanded.lstrip(" "))
     body = expanded.lstrip(" ")
+    # Keep indent readable; prefer wrapping feel via ellipsis only on very long lines.
     if len(body) > max_chars:
         body = body[: max_chars - 1] + "…"
-    return ("\u00a0" * min(leading, 16)) + body
+    return ("\u00a0" * min(leading, 20)) + body
 
 
 def _heading_key(text: str) -> str:
@@ -143,7 +198,6 @@ def write_svg_poster(
     lines = _wrap(headline, 18, 3)
     seed = int(hashlib.sha256(f"{headline}|{lang}".encode()).hexdigest()[:8], 16)
     drift = 80 + (seed % 140)
-    preview = _preview_lines(lang, code)
     title_svg = []
     y = 430
     for line in lines:
@@ -159,21 +213,32 @@ def write_svg_poster(
             f'fill="#a1a1aa">{subtitle}</text>'
         )
         y += 56
-    code_top = min(max(y + 72, 1040), 1280)
-    row_h = 48
-    card_h = row_h * len(preview) + 88
+    footer_top = 1700
+    code_top = min(max(y + 56, 980), 1180)
+    row_h = 44
+    max_rows = max(4, (footer_top - code_top - 100) // row_h)
+    preview = _preview_lines(lang, code, max_lines=max_rows)
+    card_h = (row_h * max(len(preview), 1) + 88) if preview else 120
+    if code_top + card_h > footer_top:
+        card_h = max(120, footer_top - code_top)
     code_svg = []
-    cy = code_top + 64
-    for index, row in enumerate(preview):
-        fill = colors["accent"] if index in {0, 1} else "#d4d4d8"
-        formatted = _format_code_row(row)
+    cy = code_top + 58
+    if preview:
+        for index, row in enumerate(preview):
+            fill = colors["accent"] if index in {0, 1} else "#d4d4d8"
+            formatted = _format_code_row(row)
+            code_svg.append(
+                f'<text x="108" y="{cy}" font-size="20" font-family="{_MONO}" fill="#52525b">'
+                f"{index + 1:02d}</text>"
+                f'<text x="160" y="{cy}" xml:space="preserve" font-size="24" font-family="{_MONO}" '
+                f'fill="{fill}">{html.escape(formatted)}</text>'
+            )
+            cy += row_h
+    else:
         code_svg.append(
-            f'<text x="108" y="{cy}" font-size="22" font-family="{_MONO}" fill="#52525b">'
-            f"{index + 1:02d}</text>"
-            f'<text x="168" y="{cy}" xml:space="preserve" font-size="26" font-family="{_MONO}" '
-            f'fill="{fill}">{html.escape(formatted)}</text>'
+            f'<text x="108" y="{cy}" font-size="28" font-family="ui-sans-serif, system-ui" '
+            f'fill="#a1a1aa">Explain reel · concept only</text>'
         )
-        cy += row_h
     dest.write_text(
         f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
   <defs>
