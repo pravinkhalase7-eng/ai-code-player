@@ -13,7 +13,7 @@ import { ReelStage } from "@/components/player/ReelStage";
 import { ReelScriptStudio, type ScriptLine } from "@/components/player/ReelScriptStudio";
 import { answerQuiz, executeCode, explainRunError, generateThumbnail, saveProgress, saveReelScript, sendChat } from "@/lib/api";
 import { downloadBlob, exportReelVideo, fileExtension } from "@/lib/reelExport";
-import { defaultCode, runCommand, sourceFilename } from "@/lib/language";
+import { runCommand, sourceFilename } from "@/lib/language";
 import { audioSrc, cn } from "@/lib/utils";
 import { firstMeaningfulHighlight } from "@/lib/codeFocus";
 import { stripDurationNoise } from "@/lib/reelHeadlines";
@@ -38,6 +38,7 @@ export function LessonPlayer({
   );
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
+  const explainOnly = useMemo(() => isExplainLesson(lesson), [lesson]);
   const exampleCode = useMemo(() => primaryCode(lesson), [lesson]);
   const [code, setCode] = useState(exampleCode);
   const [highlight, setHighlight] = useState<HighlightRange | null>(null);
@@ -83,7 +84,7 @@ export function LessonPlayer({
     setManualStepping(false);
     setLiveSteps(null);
     setRunHelp(null);
-    setCode(scene?.code?.trim() ? scene.code : exampleCode || "");
+    setCode(explainOnly ? "" : scene?.code?.trim() ? scene.code : exampleCode || "");
     setCurrentTime(0);
     if (scene?.type === "code") {
       setHighlight(firstMeaningfulHighlight(scene.code || exampleCode, scene.highlight_ranges ?? []) ?? null);
@@ -96,7 +97,7 @@ export function LessonPlayer({
     } else {
       setHighlight(null);
     }
-  }, [index, scene, exampleCode]);
+  }, [index, scene, exampleCode, explainOnly]);
 
   useEffect(() => {
     if (lesson.format !== "reel") return;
@@ -626,7 +627,7 @@ export function LessonPlayer({
       {isReel && reelReview ? (
         <ReelScriptStudio
           lesson={lesson}
-          code={draftCode}
+          code={explainOnly ? "" : draftCode}
           lines={draftLines}
           busy={scriptBusy}
           error={scriptError}
@@ -639,6 +640,7 @@ export function LessonPlayer({
           onRecord={() => void confirmScriptAndRecord()}
           onDownload={() => void downloadReel()}
           downloading={exporting}
+          explainOnly={explainOnly}
         />
       ) : (
         <>
@@ -707,7 +709,7 @@ export function LessonPlayer({
           <ReelStage
             lesson={{ ...lesson, thumbnail_url: thumbUrl || lesson.thumbnail_url }}
             scene={scene}
-            code={code}
+            code={explainOnly ? "" : code}
             caption={stripDurationNoise(caption)}
             highlight={highlight}
             playing={playing}
@@ -845,12 +847,26 @@ function scriptLinesFrom(lesson: Lesson): ScriptLine[] {
   }));
 }
 
+function isExplainLesson(lesson: Lesson): boolean {
+  if (lesson.requires_code === false) return true;
+  const types = new Set(lesson.scenes.map((item) => item.type));
+  if (types.has("concept") && !types.has("code") && !types.has("execution")) return true;
+  const topic = (lesson.topic || "").toLowerCase();
+  const conceptual =
+    /\b(rag|agentic|llm|llms|chatgpt|transformer|neural|prompt engineering|embedding|hallucinat|retrieval|vector db|multi-agent)\b/.test(topic) ||
+    /^(what is|what.s|whats|explain|define)\b/.test(topic);
+  if (lesson.format === "reel" && conceptual) return true;
+  if (types.has("concept")) {
+    const code = lesson.scenes.map((s) => s.code || "").join("\n");
+    if (/for\s+i\s+in\s+range\s*\(\s*[0-9]+\s*\)/.test(code) || /for\s*\(\s*let\s+i\s*=\s*0/.test(code)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function primaryCode(lesson: Lesson): string {
-  const explainOnly =
-    lesson.requires_code === false ||
-    (!lesson.scenes.some((item) => item.type === "code" || item.type === "execution") &&
-      lesson.scenes.some((item) => item.type === "concept"));
-  if (explainOnly) return "";
+  if (isExplainLesson(lesson)) return "";
   const scenes = [...lesson.scenes].filter((item) => (item.code || "").trim().length > 20);
   const preferred = scenes.find((item) => item.type === "code") || scenes[0];
   return preferred?.code || "";

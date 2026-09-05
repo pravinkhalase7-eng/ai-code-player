@@ -25,6 +25,7 @@ export function ReelScriptStudio({
   onRecord,
   onDownload,
   downloading,
+  explainOnly = false,
 }: {
   lesson: Lesson;
   code: string;
@@ -38,18 +39,22 @@ export function ReelScriptStudio({
   onRecord: () => void;
   onDownload: () => void;
   downloading?: boolean;
+  explainOnly?: boolean;
 }) {
   const locked = Boolean(busy);
   return (
     <div className="flex min-h-[72vh] flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-zinc-950">
       <div className="border-b border-white/10 px-5 py-4">
         <p className="text-xs uppercase tracking-[0.22em] text-amber-300">Review before playing</p>
-        <h2 className="mt-1 text-xl font-semibold text-white">Script and program</h2>
+        <h2 className="mt-1 text-xl font-semibold text-white">{explainOnly ? "Explain script" : "Script and program"}</h2>
         <p className="mt-1 text-sm text-zinc-400">
-          Edit the spoken lines and the program here first. Playback and recording stay off until you choose one of the buttons below.
+          {explainOnly
+            ? "Edit the spoken lines for this info reel. There is no program — playback stays off until you choose a button below."
+            : "Edit the spoken lines and the program here first. Playback and recording stay off until you choose one of the buttons below."}
         </p>
       </div>
-      <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+      <div className={`grid min-h-0 flex-1 gap-4 overflow-y-auto p-5 ${explainOnly ? "" : "lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]"}`}>
+        {explainOnly ? null : (
         <section className="flex min-h-0 flex-col">
           <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
             Program · {sourceFilename(lesson.language)}
@@ -65,6 +70,7 @@ export function ReelScriptStudio({
             {busy === "rewrite" ? "Rewriting…" : "Rewrite script from this program"}
           </Button>
         </section>
+        )}
         <section className="space-y-3">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">Spoken script</p>
           {lines.length ? (

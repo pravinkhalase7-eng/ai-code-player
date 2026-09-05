@@ -305,9 +305,19 @@ def visualize_execution(language: str, code: str, stdout: list[str] | None = Non
 
 
 def extract_primary_code(lesson_json: dict[str, Any]) -> tuple[str, str]:
+    language = str(lesson_json.get("language") or "java")
+    if lesson_json.get("requires_code") is False:
+        return language, ""
+    try:
+        from app.agents.topic_mode import topic_requires_code
+
+        if lesson_json.get("format") == "reel" and not topic_requires_code(str(lesson_json.get("topic") or "")):
+            return language, ""
+    except Exception:
+        pass
     for scene in lesson_json.get("scenes", []):
         if scene.get("type") == "code" and scene.get("code"):
-            return str(scene.get("language") or "java"), str(scene["code"])
+            return str(scene.get("language") or language), str(scene["code"])
         if scene.get("type") == "execution" and scene.get("code"):
-            return str(scene.get("language") or "java"), str(scene["code"])
-    return "java", ""
+            return str(scene.get("language") or language), str(scene["code"])
+    return language, ""

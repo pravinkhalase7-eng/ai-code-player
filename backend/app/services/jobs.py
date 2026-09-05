@@ -45,8 +45,18 @@ def _redis_ready() -> bool:
         return False
 
 
-def enqueue(job_id: str, kind: str) -> None:
-    if settings.use_celery and not settings.celery_eager and _redis_ready():
+def enqueue(job_id: str, kind: str, *, force_local: bool = False) -> None:
+    """Queue a job via Celery, or run it in-process when Celery is down/stuck.
+
+    force_local=True is used when resuming a lesson that stayed queued — Redis may
+    accept the message while no worker consumes it, which leaves the UI spinning.
+    """
+    if (
+        not force_local
+        and settings.use_celery
+        and not settings.celery_eager
+        and _redis_ready()
+    ):
         try:
             from app.workers.tasks import dispatch
 
@@ -69,6 +79,7 @@ def enqueue(job_id: str, kind: str) -> None:
             with _active_lock:
                 _active_jobs.discard(job_id)
 
+    logger.info("Running job %s (%s) on a local worker thread%s", job_id, kind, " (forced)" if force_local else "")
     thread = threading.Thread(target=_run, args=(), daemon=True, name=f"job-{kind}")
     thread.start()
 
@@ -104,6 +115,11 @@ def resume_lesson_job(db: Session, lesson_id: str) -> None:
                 "format": (row.lesson_json or {}).get("format") or "lesson",
                 "user_id": row.user_id,
                 "reel_seconds": (row.lesson_json or {}).get("reel_seconds") or 30,
+                **(
+                    {"requires_code": (row.lesson_json or {}).get("requires_code")}
+                    if isinstance(row.lesson_json, dict) and "requires_code" in row.lesson_json
+                    else {}
+                ),
             },
         )
     elif match.status in {"completed", "failed"}:
@@ -112,7 +128,8 @@ def resume_lesson_job(db: Session, lesson_id: str) -> None:
         match.progress = 0
         db.commit()
 
-    enqueue(match.id, "lesson_generation")
+    # Stuck queued lessons: prefer an in-process thread so a dead Celery worker cannot block the UI.
+    enqueue(match.id, "lesson_generation", force_local=True)
 
 
 def recover_unfinished_jobs() -> None:

@@ -63,7 +63,7 @@ export function ReelStage({
   const thumb = lesson.thumbnail_url || "";
   const cta = reelCta(lesson, scene);
   const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
-  const isConcept = scene.type === "concept";
+  const isConcept = scene.type === "concept" || ((scene.type === "code" || scene.type === "execution") && (!(code || "").trim() || lesson.requires_code === false));
   const infoAnim = useMemo(
     () => (isConcept ? infoBulletAt(scene.bullets || [], currentTime, duration) : null),
     [isConcept, scene.bullets, currentTime, duration],
@@ -102,7 +102,7 @@ export function ReelStage({
         ))}
       </div>
 
-      <div className="pointer-events-none absolute right-2 top-11 z-30 rounded-2xl bg-white/92 px-1.5 py-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+      <div className="pointer-events-none absolute right-2 top-11 z-30 drop-shadow-[0_8px_18px_rgba(0,0,0,0.55)]">
         <img src="/techshala-logo.png" alt="TECHSHALA by Pavi" className="h-[5.5rem] w-auto" />
       </div>
 
@@ -137,7 +137,7 @@ export function ReelStage({
             </div>
           )}
         </div>
-      ) : scene.type === "concept" ? (
+      ) : isConcept ? (
         <>
           <div className="pointer-events-none absolute inset-0 z-[2] overflow-hidden">
             <div className="info-orb bg-violet-500/45" style={{ width: 190, height: 190, left: -48, top: 110 }} />

@@ -407,6 +407,8 @@ def build_lesson(
 
     language_name, code = extract_primary_code(lesson.model_dump(mode="json"))
     result: ExecuteResult | None = None
+    if lesson.requires_code is False:
+        code = ""
     if code.strip():
         try:
             result = execute_in_sandbox(language_name, code)
@@ -581,8 +583,10 @@ def _update_reel_script(
     rewrite: bool,
 ) -> Lesson:
     lesson = Lesson.model_validate(row.lesson_json)
+    if lesson.requires_code is False:
+        code = ""
     _, existing = extract_primary_code(lesson.model_dump(mode="json"))
-    program = (code or "").strip() or existing
+    program = "" if lesson.requires_code is False else ((code or "").strip() or existing)
     updates = {item.id: item for item in scenes}
     if rewrite:
         if not program.strip():

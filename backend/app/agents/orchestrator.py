@@ -486,9 +486,14 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
 def _normalize_reel(lesson: Lesson) -> Lesson:
     from app.schemas.lesson import ConceptScene, IntroScene, SummaryScene
 
-    explain = lesson.requires_code is False or (
-        not any(scene.type == "code" for scene in lesson.scenes)
-        and any(scene.type == "concept" for scene in lesson.scenes)
+    conceptual = not topic_requires_code(lesson.topic)
+    explain = (
+        lesson.requires_code is False
+        or conceptual
+        or (
+            not any(scene.type in {"code", "execution"} for scene in lesson.scenes)
+            and any(scene.type == "concept" for scene in lesson.scenes)
+        )
     )
     allowed = {"intro", "concept", "summary"} if explain else {"intro", "code", "execution", "terminal", "summary"}
     scenes = [scene for scene in lesson.scenes if scene.type in allowed]
@@ -522,10 +527,29 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
                 takeaways=["Save this", lesson.topic],
             ),
         )
+    if explain:
+        cleaned = []
+        for scene in scenes:
+            patch: dict = {}
+            if getattr(scene, "code", None):
+                patch["code"] = ""
+            if getattr(scene, "highlight_ranges", None):
+                patch["highlight_ranges"] = []
+            if getattr(scene, "expected_output", None):
+                patch["expected_output"] = []
+            if getattr(scene, "stdout", None):
+                patch["stdout"] = []
+            if getattr(scene, "stderr", None):
+                patch["stderr"] = ""
+            if getattr(scene, "iterations", None):
+                patch["iterations"] = []
+            cleaned.append(scene.model_copy(update=patch) if patch else scene)
+        scenes = cleaned
     return lesson.model_copy(
         update={
             "format": LessonFormat.reel,
             "scenes": scenes,
+            "code_examples": [] if explain else list(lesson.code_examples or []),
             "requires_code": False if explain else bool(lesson.requires_code),
         }
     )

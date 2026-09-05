@@ -365,7 +365,11 @@ def fill_empty_scene_code(data: dict) -> dict:
     try:
         from app.agents.topic_mode import topic_requires_code
 
-        if data.get("format") == "reel" and not topic_requires_code(str(data.get("topic") or "")):
+        topic = str(data.get("topic") or "")
+        if data.get("format") == "reel" and not topic_requires_code(topic):
+            # Conceptual info reels must never receive fallback for-loop filler.
+            data = dict(data)
+            data["requires_code"] = False
             return data
     except Exception:
         pass

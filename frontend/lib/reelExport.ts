@@ -103,13 +103,11 @@ function drawWatermark(ctx: CanvasRenderingContext2D, mark: HTMLCanvasElement | 
   if (!mark) return;
   const width = 96;
   const height = width * (mark.height / Math.max(1, mark.width));
-  const pad = 10;
   const x = WIDTH - width - 20;
   const y = 48;
   ctx.save();
-  ctx.fillStyle = "rgba(255,255,255,0.9)";
-  roundRect(ctx, x - pad, y - pad, width + pad * 2, height + pad * 2, 16);
-  ctx.fill();
+  ctx.shadowColor = "rgba(0,0,0,0.55)";
+  ctx.shadowBlur = 18;
   ctx.globalAlpha = 0.96;
   ctx.drawImage(mark, x, y, width, height);
   ctx.restore();
@@ -576,7 +574,7 @@ function drawFrame(
       });
     }
     ctx.textAlign = "left";
-  } else if (scene.type === "concept") {
+  } else if (scene.type === "concept" || lesson.requires_code === false) {
     drawConceptPanel(ctx, scene, elapsed, duration, topic);
   } else {
     ctx.textAlign = "center";
