@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowRight, Clapperboard, Sparkles } from "lucide-react";
+import { ArrowRight, Clapperboard, Info, Sparkles, Timer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,21 +10,27 @@ import { createLesson, getHealth, listLessons } from "@/lib/api";
 import { LANGUAGES, topicForLanguage, type LessonLanguage } from "@/lib/language";
 import {
   SPOKEN_LANGUAGES,
+  REEL_DURATIONS,
   readStoredFormat,
+  readStoredReelSeconds,
   readStoredSpokenLanguage,
   storeFormat,
+  storeReelSeconds,
   storeSpokenLanguage,
+  type MakeMode,
+  type ReelSeconds,
   type SpokenLanguage,
 } from "@/lib/spokenLanguage";
 import { cn } from "@/lib/utils";
-import type { LessonFormat, LessonSummary } from "@/types/lesson";
+import type { LessonSummary } from "@/types/lesson";
 
 export function Dashboard() {
   const router = useRouter();
   const [topic, setTopic] = useState("Explain Java for loop");
   const [language, setLanguage] = useState<LessonLanguage>("java");
   const [spokenLanguage, setSpokenLanguage] = useState<SpokenLanguage>("en");
-  const [format, setFormat] = useState<LessonFormat>("lesson");
+  const [format, setFormat] = useState<MakeMode>("lesson");
+  const [reelSeconds, setReelSeconds] = useState<ReelSeconds>(30);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [lessons, setLessons] = useState<LessonSummary[]>([]);
@@ -33,6 +39,7 @@ export function Dashboard() {
   useEffect(() => {
     setSpokenLanguage(readStoredSpokenLanguage());
     setFormat(readStoredFormat());
+    setReelSeconds(readStoredReelSeconds());
     void listLessons()
       .then((payload) => setLessons(payload.lessons))
       .catch(() => undefined);
@@ -53,7 +60,18 @@ export function Dashboard() {
     try {
       storeSpokenLanguage(spokenLanguage);
       storeFormat(format);
-      const created = await createLesson(topic || "for loop", language, "beginner", format, spokenLanguage);
+      const apiFormat = format === "lesson" ? "lesson" : "reel";
+      if (apiFormat === "reel") storeReelSeconds(reelSeconds);
+      const requiresCode = format === "info" ? false : format === "reel" ? true : undefined;
+      const created = await createLesson(
+        topic || (format === "info" ? "what is large language model" : "for loop"),
+        language,
+        "beginner",
+        apiFormat,
+        spokenLanguage,
+        reelSeconds,
+        requiresCode,
+      );
       router.push(`/learn/${created.lesson_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the lesson");
@@ -71,7 +89,7 @@ export function Dashboard() {
         </h1>
         <p className="mt-4 max-w-2xl text-lg text-zinc-400">
           Ask for a concept. Byte generates a lesson, types the code, runs it in a sandbox, and walks through every iteration.
-          Or cut a catchy short you can watch like a reel.
+          Or cut a catchy short — coding demos, or explain-only topics like "what is an LLM".
         </p>
       </div>
 
@@ -123,11 +141,12 @@ export function Dashboard() {
         <p className="mb-4 text-xs text-zinc-500">
           Byte will teach in {SPOKEN_LANGUAGES.find((item) => item.id === spokenLanguage)?.label}.
         </p>
-        <div className="mb-4 grid gap-2 sm:grid-cols-2">
+        <div className="mb-4 grid gap-2 sm:grid-cols-3">
           {(
             [
               { id: "lesson" as const, label: "Full lesson", hint: "Walkthrough, execution, quiz" },
-              { id: "reel" as const, label: "Short", hint: "Catchy hook, code, punchline" },
+              { id: "reel" as const, label: "Code short", hint: "Hook + runnable program" },
+              { id: "info" as const, label: "Info reel", hint: "No program — concepts like LLMs" },
             ] as const
           ).map((item) => (
             <button
@@ -137,26 +156,67 @@ export function Dashboard() {
               onClick={() => {
                 setFormat(item.id);
                 storeFormat(item.id);
+                if (item.id === "info" && (!topic.trim() || /for loop/i.test(topic))) {
+                  setTopic("what is large language model");
+                }
               }}
               className={cn(
                 "rounded-2xl border px-4 py-3 text-left transition",
                 format === item.id
-                  ? "border-amber-300/60 bg-amber-400/15 text-white"
+                  ? item.id === "info"
+                    ? "border-violet-300/60 bg-violet-400/15 text-white"
+                    : "border-amber-300/60 bg-amber-400/15 text-white"
                   : "border-white/10 bg-white/5 text-zinc-300 hover:border-amber-300/30",
               )}
             >
               <span className="flex items-center gap-2 text-sm font-semibold">
-                {item.id === "reel" ? <Clapperboard className="h-4 w-4 text-amber-300" /> : <Sparkles className="h-4 w-4 text-amber-300" />}
+                {item.id === "reel" ? (
+                  <Clapperboard className="h-4 w-4 text-amber-300" />
+                ) : item.id === "info" ? (
+                  <Info className="h-4 w-4 text-violet-300" />
+                ) : (
+                  <Sparkles className="h-4 w-4 text-amber-300" />
+                )}
                 {item.label}
               </span>
               <span className="mt-1 block text-xs text-zinc-400">{item.hint}</span>
             </button>
           ))}
         </div>
+        {format === "reel" || format === "info" ? (
+          <div className="mb-4">
+            <p className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+              <Timer className="h-3.5 w-3.5" />
+              Short length
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {REEL_DURATIONS.map((item) => (
+                <button
+                  key={item.seconds}
+                  type="button"
+                  aria-pressed={reelSeconds === item.seconds}
+                  onClick={() => {
+                    setReelSeconds(item.seconds);
+                    storeReelSeconds(item.seconds);
+                  }}
+                  className={cn(
+                    "rounded-full border px-4 py-1.5 text-sm transition",
+                    reelSeconds === item.seconds
+                      ? "border-amber-300/60 bg-amber-400 text-zinc-950"
+                      : "border-white/10 bg-white/5 text-zinc-300 hover:border-amber-300/30",
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-zinc-500">Byte will script and time the reel to about {reelSeconds} seconds.</p>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-3 md:flex-row">
           <Input value={topic} onChange={(event) => setTopic(event.target.value)} />
           <Button onClick={start} disabled={busy} className="md:w-48">
-            {busy ? "Preparing..." : format === "reel" ? "Make a Short" : "Start Learning"}
+            {busy ? "Preparing..." : format === "info" ? "Make Info Reel" : format === "reel" ? "Make a Short" : "Start Learning"}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
@@ -188,7 +248,7 @@ export function Dashboard() {
                       <div className="relative h-28 w-full overflow-hidden bg-zinc-900">
                         <img src={lesson.thumbnail_url} alt="" className="h-full w-full object-cover" />
                         <span className="absolute left-3 top-3 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-950">
-                          Short
+                          {lesson.reel_seconds ? `${lesson.reel_seconds}s` : "Short"}
                         </span>
                       </div>
                     ) : null}
@@ -196,7 +256,11 @@ export function Dashboard() {
                     <div className="flex items-center justify-between gap-3">
                       <p className="font-semibold text-white">{lesson.format === "reel" ? lesson.topic : lesson.title}</p>
                       <span className="text-xs uppercase text-amber-200">
-                        {lesson.format === "reel" ? "short" : lesson.status === "ready" ? lesson.language : lesson.status}
+                        {lesson.format === "reel"
+                          ? `${lesson.reel_seconds || 30}s short`
+                          : lesson.status === "ready"
+                            ? lesson.language
+                            : lesson.status}
                         {lesson.spoken_language && lesson.spoken_language !== "en"
                           ? ` · ${lesson.spoken_language}`
                           : ""}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import os
 import resource
 import shutil
@@ -15,6 +16,56 @@ logger = logging.getLogger(__name__)
 MAX_OUTPUT = int(os.environ.get("CODE_EXECUTION_OUTPUT_LIMIT", "65536"))
 DEFAULT_TIMEOUT = int(os.environ.get("CODE_EXECUTION_TIMEOUT", "5"))
 MEMORY_MB = int(os.environ.get("CODE_EXECUTION_MEMORY_MB", "256"))
+_JAVA_HOME: str | None = None
+_JAVA_HOME_READY = False
+
+
+def discover_java_home() -> str | None:
+    """Find a real JDK. macOS /usr/bin/java is a stub without JAVA_HOME."""
+    global _JAVA_HOME, _JAVA_HOME_READY
+    if _JAVA_HOME_READY:
+        return _JAVA_HOME
+    _JAVA_HOME_READY = True
+    env_home = (os.environ.get("JAVA_HOME") or "").strip()
+    if env_home and (Path(env_home) / "bin" / "javac").exists():
+        _JAVA_HOME = env_home
+        return _JAVA_HOME
+    java_home_tool = Path("/usr/libexec/java_home")
+    if java_home_tool.exists():
+        try:
+            probed = subprocess.run(
+                [str(java_home_tool)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            home = (probed.stdout or "").strip().splitlines()
+            if home and (Path(home[0]) / "bin" / "javac").exists():
+                _JAVA_HOME = home[0]
+                return _JAVA_HOME
+        except Exception:
+            logger.warning("java_home probe failed", exc_info=True)
+    for candidate in (
+        "/opt/java/openjdk",
+        "/usr/lib/jvm/java-21-openjdk-amd64",
+        "/usr/lib/jvm/java-17-openjdk-amd64",
+        "/opt/homebrew/opt/openjdk",
+        "/usr/local/opt/openjdk",
+    ):
+        if (Path(candidate) / "bin" / "javac").exists():
+            _JAVA_HOME = candidate
+            return _JAVA_HOME
+    return None
+
+
+def _resolve_bin(name: str) -> str | None:
+    java_home = discover_java_home()
+    if name in {"java", "javac"} and java_home:
+        candidate = Path(java_home) / "bin" / name
+        if candidate.exists():
+            return str(candidate)
+    return shutil.which(name)
 
 
 @dataclass
@@ -103,18 +154,45 @@ def _limit_resources() -> None:
         pass
 
 
+def _needs_stdin(code: str) -> bool:
+    lowered = code or ""
+    return bool(
+        re.search(r"\bScanner\s*\(", lowered)
+        or re.search(r"System\.in\b", lowered)
+        or re.search(r"\binput\s*\(", lowered)
+        or re.search(r"readline\s*\(", lowered)
+        or re.search(r"process\.stdin", lowered)
+    )
+
+
+def _demo_stdin(code: str) -> str:
+    # One line is enough for nextLine()/input(); keep deterministic for thumbnails.
+    if re.search(r"nextInt\s*\(|int\s*\(.*input", code or ""):
+        return "7\n"
+    return "Neha\n"
+
+
 def _run(
     command: list[str],
     workdir: Path,
     timeout: int,
     env: dict[str, str] | None = None,
+    stdin_data: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    java_home = discover_java_home()
+    path_dirs = []
+    if java_home:
+        path_dirs.append(str(Path(java_home) / "bin"))
+    path_dirs.extend(
+        ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"]
+    )
     safe_env = {
-        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "PATH": ":".join(path_dirs),
         "HOME": str(workdir),
         "LANG": "C.UTF-8",
-        "JAVA_TOOL_OPTIONS": "-Xmx128m",
     }
+    if java_home:
+        safe_env["JAVA_HOME"] = java_home
     if env:
         safe_env.update(env)
     return subprocess.run(
@@ -124,6 +202,7 @@ def _run(
         text=True,
         timeout=timeout,
         env=safe_env,
+        input=stdin_data,
         preexec_fn=_limit_resources if os.name == "posix" else None,
         check=False,
     )
@@ -149,7 +228,8 @@ def execute(language: str, code: str, timeout: int | None = None) -> RunResult:
 
         compile_cmd = spec.compile(workdir)
         if compile_cmd:
-            if shutil.which(compile_cmd[0]) is None:
+            tool = _resolve_bin(compile_cmd[0])
+            if tool is None:
                 return RunResult(
                     success=False,
                     stdout=[],
@@ -157,6 +237,7 @@ def execute(language: str, code: str, timeout: int | None = None) -> RunResult:
                     execution_time_ms=int((time.perf_counter() - started) * 1000),
                     compile_error=True,
                 )
+            compile_cmd = [tool, *compile_cmd[1:]]
             try:
                 compiled = _run(compile_cmd, workdir, timeout)
             except subprocess.TimeoutExpired:
@@ -178,15 +259,18 @@ def execute(language: str, code: str, timeout: int | None = None) -> RunResult:
                 )
 
         run_cmd = spec.run(workdir)
-        if shutil.which(run_cmd[0]) is None:
+        tool = _resolve_bin(run_cmd[0])
+        if tool is None:
             return RunResult(
                 success=False,
                 stdout=[],
                 stderr=f"{run_cmd[0]} is not installed in the sandbox.",
                 execution_time_ms=int((time.perf_counter() - started) * 1000),
             )
+        run_cmd = [tool, *run_cmd[1:]]
+        stdin_data = _demo_stdin(code) if _needs_stdin(code) else None
         try:
-            ran = _run(run_cmd, workdir, timeout)
+            ran = _run(run_cmd, workdir, timeout, stdin_data=stdin_data)
         except subprocess.TimeoutExpired:
             return RunResult(
                 success=False,

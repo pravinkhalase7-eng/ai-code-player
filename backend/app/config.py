@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     tts_speed: float = 0.96
     kokoro_url: str = "http://localhost:8880"
 
-    image_provider: str = "gemini"
+    image_provider: str = "local"
     remotion_renderer_url: str = "http://localhost:3000"
 
     storage_provider: str = "local"

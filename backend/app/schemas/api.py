@@ -3,7 +3,15 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.lesson import EvaluationResult, ExecutionStep, Lesson, LessonFormat, LessonLevel, ReelSceneScript
+from app.schemas.lesson import (
+    EvaluationResult,
+    ExecutionStep,
+    Lesson,
+    LessonFormat,
+    LessonLevel,
+    ReelSceneScript,
+    normalize_reel_seconds,
+)
 from app.services.locale import normalize_spoken_language
 from app.services.visualizer import normalize_language
 
@@ -15,6 +23,8 @@ class LessonCreateRequest(BaseModel):
     level: LessonLevel = LessonLevel.beginner
     format: LessonFormat = LessonFormat.lesson
     user_id: str | None = None
+    reel_seconds: int = 30
+    requires_code: bool | None = None
 
     @field_validator("language")
     @classmethod
@@ -25,6 +35,11 @@ class LessonCreateRequest(BaseModel):
     @classmethod
     def _spoken(cls, value: str) -> str:
         return normalize_spoken_language(value)
+
+    @field_validator("reel_seconds")
+    @classmethod
+    def _reel_seconds(cls, value: int) -> int:
+        return normalize_reel_seconds(value)
 
 
 class LessonCreateResponse(BaseModel):

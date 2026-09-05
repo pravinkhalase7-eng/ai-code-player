@@ -19,8 +19,20 @@ export type SpokenWord = {
 
 const DURATION_NOISE = /\b(?:in\s+)?30(?:\s*|-)?seconds?\b|\b30s\b/gi;
 
+export function stripSpeechMarkup(text: string): string {
+  return (text || "")
+    .replace(/```[\w+-]*\n?/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/`/g, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.!?।;:])/g, "$1")
+    .trim();
+}
+
 export function stripDurationNoise(text: string): string {
-  const stripped = (text || "")
+  const stripped = stripSpeechMarkup(text || "")
     .replace(DURATION_NOISE, " ")
     .replace(/^\s*[:\-–—]\s*/, "")
     .replace(/\s+([,.!?;:।])/g, "$1")
@@ -55,7 +67,7 @@ export function highlightedSnippet(code: string, highlight: HighlightRange | nul
 }
 
 export function timedWords(text: string, start: number, end: number, time: number): SpokenWord[] {
-  const words = (text || "").trim().split(/\s+/).filter(Boolean);
+  const words = stripSpeechMarkup(text || "").trim().split(/\s+/).filter(Boolean);
   if (!words.length) return [];
   const span = Math.max(0.08, end - start);
   const weights = words.map((word) => Math.max(2, word.replace(/[^\w\u0900-\u0D7F]/g, "").length) + 0.35);

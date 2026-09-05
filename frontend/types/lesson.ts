@@ -93,6 +93,8 @@ export type Lesson = {
   concepts?: string[];
   scenes: LessonScene[];
   thumbnail_url?: string | null;
+  reel_seconds?: number;
+  requires_code?: boolean;
 };
 
 export type LessonSummary = {
@@ -107,6 +109,7 @@ export type LessonSummary = {
   scene_index?: number;
   topic: string;
   thumbnail_url?: string | null;
+  reel_seconds?: number;
 };
 
 export type RunHelp = {

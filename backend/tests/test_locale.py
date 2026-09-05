@@ -1,4 +1,4 @@
-from app.services.locale import candidate_voices, normalize_spoken_language, spoken_locale, strip_duration_copy, tts_voice_for
+from app.services.locale import candidate_voices, normalize_spoken_language, spoken_locale, speech_text, strip_duration_copy, tts_voice_for
 from app.services.tts.google_tts import resolve_cloud_voice
 
 
@@ -14,6 +14,47 @@ def test_strip_duration_copy_removes_30s_branding() -> None:
     assert strip_duration_copy("30s: Java For Loop") == "Java For Loop"
     assert "30" not in strip_duration_copy("Stop scrolling. Java for loops in 30 seconds.")
     assert "30s" not in strip_duration_copy("This 30s short teaches await")
+
+
+def test_strip_scroll_hook_keeps_the_question() -> None:
+    from app.services.locale import hook_narration, pick_reel_hook, strip_scroll_hook
+
+    spoken = strip_scroll_hook("स्क्रॉल करना बंद करो! Java में दो classes को एक साथ extend क्यों नहीं कर सकते?")
+    assert "स्क्रॉल" not in spoken
+    assert "Java में दो classes" in spoken
+    assert "Stop scrolling" not in strip_scroll_hook("Stop scrolling. Why can't Java extend two classes?")
+    hook = pick_reel_hook("hi", "Diamond Problem", "les_hooks")
+    assert "स्क्रॉल" not in hook
+    assert "Diamond Problem" in hook
+    cleaned = hook_narration(
+        "स्क्रॉल करना बंद करो! Java में multiple inheritance क्यों नहीं होता?",
+        "hi",
+        "multiple inheritance",
+        "les_x",
+    )
+    assert cleaned.startswith("Java में")
+
+
+def test_speech_text_strips_backticks() -> None:
+    spoken = speech_text("लाइन 1 में `abstract class Car` बेस स्ट्रक्चर बनाती है।")
+    assert "`" not in spoken
+    assert "abstract class Car" in spoken
+    assert spoken.startswith("लाइन 1 में abstract class Car")
+    assert speech_text("Use **this** line") == "Use this line"
+
+
+def test_teachable_narration_rejects_pasted_java() -> None:
+    from app.services.locale import looks_like_source_code, teachable_narration
+
+    pasted = (
+        "Interface A { default void show() { System.out.println(\"A\"); } }\n"
+        "interface B { default void show() { System.out.println(\"B\"); } }\n"
+        "public class Main implements A, B { public void show() { A.super.show(); } }"
+    )
+    assert looks_like_source_code(pasted)
+    spoken = teachable_narration(pasted, "hi")
+    assert "{" not in spoken
+    assert "प्रोग्राम" in spoken
 
 
 def test_hindi_voice_stays_in_hindi() -> None:

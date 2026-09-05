@@ -46,6 +46,22 @@ def _java_runtime_available() -> bool:
 pytestmark = pytest.mark.skipif(not _java_runtime_available(), reason="Java runtime is required")
 
 
+def test_java_interface_default_methods() -> None:
+    source = """interface A { default void show() { System.out.println("A"); } }
+interface B { default void show() { System.out.println("B"); } }
+public class Main implements A, B {
+    public void show() { A.super.show(); }
+    public static void main(String[] args) {
+        new Main().show();
+    }
+}
+"""
+    result = execute("java", source, timeout=8)
+    assert result.success is True, result.stderr
+    assert result.stdout == ["A"]
+    assert "Unable to locate a Java Runtime" not in (result.stderr or "")
+
+
 def test_java_for_loop_stdout() -> None:
     result = execute("java", JAVA_FOR, timeout=8)
     assert result.success is True

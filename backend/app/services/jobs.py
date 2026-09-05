@@ -103,6 +103,7 @@ def resume_lesson_job(db: Session, lesson_id: str) -> None:
                 "level": row.level,
                 "format": (row.lesson_json or {}).get("format") or "lesson",
                 "user_id": row.user_id,
+                "reel_seconds": (row.lesson_json or {}).get("reel_seconds") or 30,
             },
         )
     elif match.status in {"completed", "failed"}:

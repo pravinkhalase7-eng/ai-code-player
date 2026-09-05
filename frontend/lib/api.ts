@@ -31,10 +31,23 @@ export function createLesson(
   level = "beginner",
   format: "lesson" | "reel" = "lesson",
   spokenLanguage = "en",
+  reelSeconds = 30,
+  requiresCode?: boolean,
 ) {
   return request<{ lesson_id: string; status: string; job_id: string }>(
     "/api/v1/tutor/lesson",
-    { method: "POST", body: JSON.stringify({ topic, language, level, format, spoken_language: spokenLanguage }) },
+    {
+      method: "POST",
+      body: JSON.stringify({
+        topic,
+        language,
+        level,
+        format,
+        spoken_language: spokenLanguage,
+        reel_seconds: format === "reel" ? reelSeconds : 30,
+        ...(typeof requiresCode === "boolean" ? { requires_code: requiresCode } : {}),
+      }),
+    },
   );
 }
 

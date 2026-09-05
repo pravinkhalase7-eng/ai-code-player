@@ -7,6 +7,18 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.services.locale import normalize_spoken_language
 
+REEL_SECONDS_CHOICES = (30, 60, 90, 120)
+
+
+def normalize_reel_seconds(value: object) -> int:
+    try:
+        seconds = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        seconds = 30
+    if seconds in REEL_SECONDS_CHOICES:
+        return seconds
+    return min(REEL_SECONDS_CHOICES, key=lambda item: abs(item - max(30, seconds)))
+
 
 class LessonLevel(str, Enum):
     beginner = "beginner"
@@ -142,6 +154,7 @@ class ExecutionScene(BaseScene):
     expected_output: list[str] = Field(default_factory=list)
     iterations: list[ExecutionStep] = Field(default_factory=list)
     verified: bool = False
+    stderr: str = ""
 
 
 class TerminalScene(BaseScene):
@@ -212,11 +225,18 @@ class TutorPlan(BaseModel):
     objectives: list[str] = Field(min_length=1, max_length=8)
     concepts: list[str] = Field(min_length=1, max_length=12)
     greeting: str = Field(min_length=1, max_length=400)
+    reel_seconds: int = 30
+    requires_code: bool = True
 
     @field_validator("spoken_language")
     @classmethod
     def _spoken(cls, value: str) -> str:
         return normalize_spoken_language(value)
+
+    @field_validator("reel_seconds")
+    @classmethod
+    def _reel_seconds(cls, value: int) -> int:
+        return normalize_reel_seconds(value)
 
 
 class Lesson(BaseModel):
@@ -232,6 +252,8 @@ class Lesson(BaseModel):
     scenes: list[LessonScene] = Field(min_length=3, max_length=24)
     code_examples: list[str] = Field(default_factory=list)
     thumbnail_url: str | None = None
+    reel_seconds: int = 30
+    requires_code: bool = True
 
     @field_validator("language")
     @classmethod
@@ -242,6 +264,11 @@ class Lesson(BaseModel):
     @classmethod
     def _spoken(cls, value: str) -> str:
         return normalize_spoken_language(value)
+
+    @field_validator("reel_seconds")
+    @classmethod
+    def _reel_seconds(cls, value: int) -> int:
+        return normalize_reel_seconds(value)
 
     @model_validator(mode="before")
     @classmethod
@@ -254,7 +281,10 @@ class Lesson(BaseModel):
     def _required_scene_types(self) -> Lesson:
         types = {scene.type for scene in self.scenes}
         if self.format == LessonFormat.reel:
-            missing = {"intro", "code", "summary"} - types
+            if self.requires_code is False or ("code" not in types and "concept" in types):
+                missing = {"intro", "concept", "summary"} - types
+            else:
+                missing = {"intro", "code", "summary"} - types
         else:
             missing = {"intro", "code", "quiz"} - types
         if missing:
@@ -300,11 +330,18 @@ class LessonDraft(BaseModel):
     concepts: list[str] = Field(default_factory=list)
     scenes: list[GenericScene] = Field(min_length=3, max_length=24)
     thumbnail_url: str | None = None
+    reel_seconds: int = 30
+    requires_code: bool = True
 
     @field_validator("spoken_language")
     @classmethod
     def _spoken(cls, value: str) -> str:
         return normalize_spoken_language(value)
+
+    @field_validator("reel_seconds")
+    @classmethod
+    def _reel_seconds(cls, value: int) -> int:
+        return normalize_reel_seconds(value)
 
 
 def fallback_example_code(language: str) -> str:
@@ -323,6 +360,18 @@ def fallback_example_code(language: str) -> str:
 
 
 def fill_empty_scene_code(data: dict) -> dict:
+    if data.get("requires_code") is False:
+        return data
+    try:
+        from app.agents.topic_mode import topic_requires_code
+
+        if data.get("format") == "reel" and not topic_requires_code(str(data.get("topic") or "")):
+            return data
+    except Exception:
+        pass
+    scene_types = {scene.get("type") for scene in (data.get("scenes") or []) if isinstance(scene, dict)}
+    if data.get("format") == "reel" and "code" not in scene_types and "execution" not in scene_types:
+        return data
     data = dict(data)
     scenes = [dict(scene) if isinstance(scene, dict) else scene for scene in (data.get("scenes") or [])]
     data["scenes"] = scenes

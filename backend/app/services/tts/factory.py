@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.errors import AppError
 from app.models.orm import TtsCache
+from app.services.locale import speech_text
 from app.services.tts.base import BrowserTTS, TTSProvider, tts_hash
 from app.services.tts.gemini_tts import GeminiTTS
 from app.services.tts.google_tts import GoogleTTS
@@ -67,7 +68,8 @@ def synthesize_narration(
     provider_name = (provider_name or settings.tts_provider).lower()
     requested_voice = voice or settings.tts_voice
     speed = speed if speed is not None else settings.tts_speed
-    cache_id = tts_hash(text, requested_voice, speed, cache_provider_key(provider_name))
+    spoken = speech_text(text) or (text or "").strip()
+    cache_id = tts_hash(spoken, requested_voice, speed, cache_provider_key(provider_name))
     cached = db.get(TtsCache, cache_id)
     if cached:
         stored = Path(settings.storage_path) / "audio" / Path(cached.path).name
@@ -99,7 +101,7 @@ def synthesize_narration(
             continue
         seen.add(name)
         try:
-            written = get_provider(name).synthesize(text, requested_voice, speed, dest)
+            written = get_provider(name).synthesize(spoken, requested_voice, speed, dest)
             if _usable_file(written):
                 used = name
                 produced = written
@@ -117,7 +119,7 @@ def synthesize_narration(
             id=cache_id,
             provider=used,
             voice=requested_voice,
-            text=text,
+            text=spoken,
             path=public_path,
         )
     )

@@ -31,6 +31,8 @@ def run_job(job_id: str, kind: str) -> None:
                 payload.get("level", "beginner"),
                 payload.get("format", "lesson"),
                 payload.get("spoken_language", "en"),
+                payload.get("reel_seconds", 30),
+                payload.get("requires_code"),
             )
             set_job(
                 db,

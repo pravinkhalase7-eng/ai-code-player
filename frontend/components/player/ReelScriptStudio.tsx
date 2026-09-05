@@ -1,6 +1,6 @@
 "use client";
 
-import { Film, Play } from "lucide-react";
+import { Download, Film, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { sourceFilename } from "@/lib/language";
 import type { Lesson } from "@/types/lesson";
@@ -23,6 +23,8 @@ export function ReelScriptStudio({
   onRewrite,
   onPlay,
   onRecord,
+  onDownload,
+  downloading,
 }: {
   lesson: Lesson;
   code: string;
@@ -34,6 +36,8 @@ export function ReelScriptStudio({
   onRewrite: () => void;
   onPlay: () => void;
   onRecord: () => void;
+  onDownload: () => void;
+  downloading?: boolean;
 }) {
   const locked = Boolean(busy);
   return (
@@ -87,6 +91,10 @@ export function ReelScriptStudio({
       </div>
       {error ? <p className="px-5 pb-2 text-sm text-red-300">{error}</p> : null}
       <div className="flex flex-wrap justify-end gap-2 border-t border-white/10 px-5 py-4">
+        <Button type="button" variant="outline" onClick={onDownload} disabled={locked || downloading}>
+          <Download className="h-4 w-4" />
+          {busy === "record" || downloading ? "Exporting…" : "Download video"}
+        </Button>
         <Button type="button" variant="outline" onClick={onRecord} disabled={locked}>
           <Film className="h-4 w-4" />
           {busy === "save" ? "Saving voice…" : busy === "record" ? "Recording video…" : "Record video"}

@@ -5,6 +5,7 @@ import { buildCues, cueAt } from "@/lib/narrationSync";
 import { beatHighlight, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
 import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
 import { isPosterScene, reelCta } from "@/lib/reelCta";
+import { infoBulletAt } from "@/lib/infoReelAnim";
 
 const WIDTH = 720;
 const HEIGHT = 1280;
@@ -178,25 +179,6 @@ function drawFollowChip(ctx: CanvasRenderingContext2D, handle: string) {
   ctx.fill();
   ctx.fillStyle = "#18181b";
   ctx.fillText(label, 28 + handleW + 25, 52);
-}
-
-function drawRail(ctx: CanvasRenderingContext2D) {
-  const labels = ["Like", "Comment", "Save", "Share"];
-  labels.forEach((label, index) => {
-    const y = HEIGHT - 430 + index * 78;
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
-    ctx.beginPath();
-    ctx.arc(WIDTH - 42, y, 22, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "700 16px ui-sans-serif, system-ui";
-    ctx.textAlign = "center";
-    ctx.fillText(["♥", "💬", "🔖", "↗"][index], WIDTH - 42, y + 6);
-    ctx.font = "700 11px ui-sans-serif, system-ui";
-    ctx.fillStyle = "rgba(255,255,255,0.82)";
-    ctx.fillText(label, WIDTH - 42, y + 38);
-  });
-  ctx.textAlign = "left";
 }
 
 function drawStudioBackground(ctx: CanvasRenderingContext2D) {
@@ -401,6 +383,126 @@ function drawByte(ctx: CanvasRenderingContext2D, x: number, y: number, scale: nu
   ctx.restore();
 }
 
+
+
+function scheduleConceptBlips(audioCtx: AudioContext, dest: MediaStreamAudioDestinationNode, scene: LessonScene, duration: number) {
+  if (scene.type !== "concept") return;
+  const beats = infoBulletAt(scene.bullets || [], 0, duration).beats;
+  for (const beat of beats) {
+    const when = audioCtx.currentTime + Math.max(0.02, beat.start);
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(660, when);
+    osc.frequency.exponentialRampToValueAtTime(880, when + 0.08);
+    gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.exponentialRampToValueAtTime(0.04, when + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.16);
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start(when);
+    osc.stop(when + 0.18);
+  }
+}
+
+function drawConceptPanel(
+  ctx: CanvasRenderingContext2D,
+  scene: LessonScene,
+  elapsed: number,
+  duration: number,
+  topic: string,
+) {
+  const footer = 220;
+  const headerBottom = 188;
+  const available = HEIGHT - footer - headerBottom;
+  const panelH = Math.min(available, 520);
+  const panelTop = headerBottom + Math.max(0, (available - panelH) / 2);
+  const x = 28;
+  const w = WIDTH - 108;
+
+  const t = elapsed;
+  const orbs = [
+    { cx: 90, cy: panelTop + 40, r: 70, color: "rgba(139,92,246,0.28)", drift: 1 },
+    { cx: WIDTH - 130, cy: panelTop + 160, r: 58, color: "rgba(232,121,249,0.22)", drift: 1.4 },
+    { cx: 140, cy: panelTop + panelH - 40, r: 48, color: "rgba(34,211,238,0.18)", drift: 0.8 },
+  ];
+  for (const orb of orbs) {
+    const ox = Math.sin(t * orb.drift) * 10;
+    const oy = Math.cos(t * orb.drift * 0.9) * 12;
+    const g = ctx.createRadialGradient(orb.cx + ox, orb.cy + oy, 4, orb.cx + ox, orb.cy + oy, orb.r);
+    g.addColorStop(0, orb.color);
+    g.addColorStop(1, "transparent");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(orb.cx + ox, orb.cy + oy, orb.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(196,181,253,0.95)";
+  ctx.font = "700 16px ui-sans-serif, system-ui";
+  ctx.fillText("EXPLAIN", WIDTH / 2, 88);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 28px ui-sans-serif, system-ui";
+  wrapLines(ctx, topic, WIDTH - 120, 2).forEach((line, index) => {
+    ctx.fillText(line, WIDTH / 2, 126 + index * 34);
+  });
+  ctx.textAlign = "left";
+
+  roundRect(ctx, x, panelTop, w, panelH, 22);
+  ctx.fillStyle = "rgba(18,7,31,0.92)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(196,181,253,0.22)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  const bullets = (scene.bullets || []).map((b) => String(b || "").trim()).filter(Boolean);
+  const anim = infoBulletAt(bullets, elapsed, duration);
+  const pad = 22;
+  let y = panelTop + pad + 8;
+  if (!bullets.length) {
+    ctx.fillStyle = "#e4e4e7";
+    ctx.font = "600 18px ui-sans-serif, system-ui";
+    wrapLines(ctx, stripDurationNoise(scene.narration || ""), w - pad * 2, 8).forEach((line, index) => {
+      ctx.fillText(line, x + pad, y + index * 26);
+    });
+    return;
+  }
+
+  const slot = Math.min(86, Math.max(58, (panelH - pad * 2) / Math.max(1, bullets.length)));
+  bullets.forEach((item, index) => {
+    if (index >= anim.visibleCount) return;
+    const active = index === anim.active;
+    const local = Math.max(0, Math.min(1, (elapsed - anim.beats[index].start) / 0.35));
+    const ease = 1 - Math.pow(1 - local, 3);
+    const by = y + index * slot;
+    ctx.save();
+    ctx.globalAlpha = 0.35 + 0.65 * ease;
+    ctx.translate(0, (1 - ease) * 14);
+    roundRect(ctx, x + pad, by, w - pad * 2, slot - 12, 14);
+    ctx.fillStyle = active ? "rgba(91,33,182,0.45)" : "rgba(0,0,0,0.35)";
+    ctx.fill();
+    ctx.strokeStyle = active ? "rgba(196,181,253,0.55)" : "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + pad + 22, by + (slot - 12) / 2, 12, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(167,139,250,0.3)";
+    ctx.fill();
+    ctx.fillStyle = "#ede9fe";
+    ctx.font = "700 12px ui-sans-serif, system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText(String(index + 1), x + pad + 22, by + (slot - 12) / 2 + 4);
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#f4f4f5";
+    ctx.font = "600 17px ui-sans-serif, system-ui";
+    wrapLines(ctx, item, w - pad * 2 - 56, 2).forEach((line, li) => {
+      ctx.fillText(line, x + pad + 44, by + 28 + li * 22);
+    });
+    ctx.restore();
+  });
+}
+
 function drawFrame(
   ctx: CanvasRenderingContext2D,
   lesson: Lesson,
@@ -474,6 +576,8 @@ function drawFrame(
       });
     }
     ctx.textAlign = "left";
+  } else if (scene.type === "concept") {
+    drawConceptPanel(ctx, scene, elapsed, duration, topic);
   } else {
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(165,243,252,0.9)";
@@ -518,7 +622,6 @@ function drawFrame(
     );
   }
 
-  drawRail(ctx);
   const viseme = visemeAt(scene.narration || "", elapsed, true, duration);
   drawByte(ctx, 16, HEIGHT - 236, 0.82, viseme);
   ctx.fillStyle = "rgba(165,243,252,0.9)";
@@ -586,7 +689,7 @@ export async function exportReelVideo(
   recorder.ondataavailable = (event) => {
     if (event.data.size) chunks.push(event.data);
   };
-  const stopped = new Promise((resolve, reject) => {
+  const stopped = new Promise<Blob>((resolve, reject) => {
     recorder.onstop = () => resolve(new Blob(chunks, { type: mime }));
     recorder.onerror = () => reject(new Error("Reel recording failed."));
   });
@@ -614,8 +717,9 @@ export async function exportReelVideo(
         mute.connect(audioCtx.destination);
         source.start();
       }
+      scheduleConceptBlips(audioCtx, dest, scene, duration);
       const started = performance.now();
-      await new Promise((resolve) => {
+      await new Promise<void>((resolve) => {
         const tick = () => {
           const elapsed = (performance.now() - started) / 1000;
           drawFrame(ctx, lesson, scene, elapsed, duration, lastCode, thumb, index, scenes.length, watermark);
@@ -633,7 +737,7 @@ export async function exportReelVideo(
     void audioCtx.close();
   }
 
-  return stopped;
+  return await stopped;
 }
 
 export function downloadBlob(blob: Blob, filename: string) {

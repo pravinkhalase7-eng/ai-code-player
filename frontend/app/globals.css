@@ -129,3 +129,47 @@ body {
 .reel-rail-pop {
   animation: reel-word-pop 0.45s ease-out;
 }
+
+.info-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(30px);
+  opacity: 0.55;
+  animation: info-orb-drift 7s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes info-orb-drift {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(18px, -24px, 0) scale(1.15); }
+}
+
+.info-bullet {
+  opacity: 0;
+  transform: translateY(16px) scale(0.96);
+  filter: blur(4px);
+  transition: opacity 0.35s ease, transform 0.35s ease, filter 0.35s ease, border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.info-bullet.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+}
+
+.info-bullet.is-active {
+  border-color: rgba(196, 181, 253, 0.55) !important;
+  background: rgba(91, 33, 182, 0.38) !important;
+  box-shadow: 0 0 0 1px rgba(196, 181, 253, 0.25), 0 10px 30px rgba(76, 29, 149, 0.35);
+  animation: info-bullet-pop 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes info-bullet-pop {
+  0% { transform: translateY(8px) scale(0.94); }
+  70% { transform: translateY(-2px) scale(1.03); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.info-step-chip {
+  animation: reel-cta-pulse 1.6s ease-in-out infinite;
+}

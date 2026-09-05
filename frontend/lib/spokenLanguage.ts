@@ -35,18 +35,55 @@ export function storeSpokenLanguage(value: SpokenLanguage) {
 
 const FORMAT_KEY = "lesson_format";
 
-export function readStoredFormat(): "lesson" | "reel" {
+export type MakeMode = "lesson" | "reel" | "info";
+
+export function readStoredFormat(): MakeMode {
   if (typeof window === "undefined") return "lesson";
   try {
-    return window.localStorage.getItem(FORMAT_KEY) === "reel" ? "reel" : "lesson";
+    const stored = window.localStorage.getItem(FORMAT_KEY);
+    if (stored === "reel" || stored === "info") return stored;
+    return "lesson";
   } catch {
     return "lesson";
   }
 }
 
-export function storeFormat(value: "lesson" | "reel") {
+export function storeFormat(value: MakeMode) {
   try {
     window.localStorage.setItem(FORMAT_KEY, value);
+  } catch {
+    /* ignore */
+  }
+}
+
+export const REEL_DURATIONS = [
+  { seconds: 30, label: "30 sec" },
+  { seconds: 60, label: "60 sec" },
+  { seconds: 90, label: "90 sec" },
+  { seconds: 120, label: "2 min" },
+] as const;
+
+export type ReelSeconds = (typeof REEL_DURATIONS)[number]["seconds"];
+
+const REEL_SECONDS_KEY = "reel_seconds";
+
+export function isReelSeconds(value: number): value is ReelSeconds {
+  return REEL_DURATIONS.some((item) => item.seconds === value);
+}
+
+export function readStoredReelSeconds(): ReelSeconds {
+  if (typeof window === "undefined") return 30;
+  try {
+    const stored = Number(window.localStorage.getItem(REEL_SECONDS_KEY) || "");
+    return isReelSeconds(stored) ? stored : 30;
+  } catch {
+    return 30;
+  }
+}
+
+export function storeReelSeconds(value: ReelSeconds) {
+  try {
+    window.localStorage.setItem(REEL_SECONDS_KEY, String(value));
   } catch {
     /* ignore */
   }

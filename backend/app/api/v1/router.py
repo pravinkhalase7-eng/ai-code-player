@@ -23,6 +23,7 @@ from app.schemas.api import (
     RunHelpResponse,
 )
 from app.schemas.lesson import Lesson
+from app.services.images.thumbnail import THUMB_VERSION
 from app.services.chat_service import ask_tutor
 from app.services.jobs import create_job, enqueue, resume_lesson_job
 from app.services.lesson_service import (
@@ -32,6 +33,8 @@ from app.services.lesson_service import (
     schedule_google_audio,
     lesson_needs_google_audio,
     schedule_reel_thumbnail,
+    lesson_needs_sandbox_rerun,
+    schedule_sandbox_rerun,
     refresh_reel_thumbnail,
     update_reel_script,
 )
@@ -52,6 +55,8 @@ def create_lesson(payload: LessonCreateRequest, db: Session = Depends(get_db)) -
         user_id=payload.user_id,
         format=payload.format.value,
         spoken_language=payload.spoken_language,
+        reel_seconds=payload.reel_seconds,
+        requires_code=payload.requires_code,
     )
     return LessonCreateResponse(lesson_id=lesson_id, status="queued", job_id=job_id)
 
@@ -131,7 +136,9 @@ def get_lesson(lesson_id: str, db: Session = Depends(get_db)) -> LessonResponse:
     lesson = Lesson.model_validate(row.lesson_json)
     if lesson_needs_google_audio(lesson):
         schedule_google_audio(row.id)
-    if (lesson.format.value == "reel") and not (lesson.thumbnail_url or "").strip():
+    elif lesson_needs_sandbox_rerun(lesson):
+        schedule_sandbox_rerun(row.id)
+    if lesson.format.value == "reel" and f"v={THUMB_VERSION}" not in (lesson.thumbnail_url or ""):
         schedule_reel_thumbnail(row.id)
     return LessonResponse(lesson=lesson, status=row.status, warnings=row.warnings or [])
 
@@ -142,6 +149,24 @@ def _pending_lesson(row: LessonRow) -> Lesson:
     fmt = (row.lesson_json or {}).get("format") or "lesson"
     spoken = (row.lesson_json or {}).get("spoken_language") or "en"
     if fmt == "reel":
+        from app.schemas.lesson import ConceptScene
+
+        explain = (row.lesson_json or {}).get("requires_code") is False
+        pending_middle = (
+            ConceptScene(
+                id="scene_concept_pending",
+                duration=12,
+                narration="The explanation bullets will appear next.",
+                bullets=["Preparing the idea...", "No program in this info reel"],
+            )
+            if explain
+            else CodeScene(
+                id="scene_code_pending",
+                duration=10,
+                narration="The example will appear next.",
+                code="public class Main {\n    public static void main(String[] args) {\n    }\n}\n",
+            )
+        )
         return Lesson(
             lesson_id=row.id,
             title=row.title,
@@ -151,14 +176,10 @@ def _pending_lesson(row: LessonRow) -> Lesson:
             format="reel",  # type: ignore[arg-type]
             topic=row.topic,
             objectives=["Cutting a short"],
+            requires_code=not explain,
             scenes=[
                 IntroScene(id="scene_pending", duration=6, narration="Give me a moment while I cut this short."),
-                CodeScene(
-                    id="scene_code_pending",
-                    duration=10,
-                    narration="The example will appear next.",
-                    code="public class Main {\n    public static void main(String[] args) {\n    }\n}\n",
-                ),
+                pending_middle,
                 SummaryScene(
                     id="scene_summary_pending",
                     duration=5,

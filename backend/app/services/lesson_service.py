@@ -24,12 +24,13 @@ from app.schemas.lesson import (
     QuizScene,
     ReelSceneScript,
     TerminalScene,
+    normalize_reel_seconds,
 )
 from app.agents.orchestrator import generate_structured_lesson, plan_lesson, rewrite_reel_script
 from app.db import SessionLocal
 from app.services.execution.client import execute_in_sandbox
 from app.services.jobs import create_job, enqueue, set_job
-from app.services.locale import spoken_locale, strip_duration_copy, tts_voice_for
+from app.services.locale import hook_narration, spoken_locale, speech_text, strip_duration_copy, teachable_narration, tts_voice_for
 from app.services.tts.base import tts_hash
 from app.services.tts.factory import audio_file_ready, cache_provider_key, synthesize_narration
 from app.services.visualizer import extract_primary_code, run_command, source_filename, visualize_execution
@@ -56,11 +57,14 @@ def queue_lesson(
     user_id: str | None,
     format: str = "lesson",
     spoken_language: str = "en",
+    reel_seconds: int = 30,
+    requires_code: bool | None = None,
 ) -> tuple[str, str]:
     uid = ensure_user(db, user_id)
     lesson_id = new_id("les_")
     fmt = "reel" if format == "reel" else "lesson"
     spoken = spoken_locale(spoken_language).id
+    seconds = normalize_reel_seconds(reel_seconds) if fmt == "reel" else 30
     title = topic.title()
     row = LessonRow(
         id=lesson_id,
@@ -70,7 +74,12 @@ def queue_lesson(
         level=level,
         topic=topic,
         status="queued",
-        lesson_json={"format": fmt, "spoken_language": spoken},
+        lesson_json={
+            "format": fmt,
+            "spoken_language": spoken,
+            "reel_seconds": seconds,
+            **({"requires_code": requires_code} if requires_code is not None else {}),
+        },
     )
     db.add(row)
     db.commit()
@@ -85,6 +94,8 @@ def queue_lesson(
             "level": level,
             "format": fmt,
             "user_id": uid,
+            "reel_seconds": seconds,
+            **({"requires_code": requires_code} if requires_code is not None else {}),
         },
     )
     enqueue(job.id, "lesson_generation")
@@ -134,15 +145,7 @@ def _apply_execution(lesson: Lesson, result: ExecuteResult) -> Lesson:
                         "expected_output": result.stdout,
                         "iterations": steps or scene.iterations,
                         "verified": result.success,
-                        "narration": (
-                            scene.narration
-                            if result.success
-                            else (
-                                spoken_locale(lesson.spoken_language).compile_error
-                                if result.compile_error
-                                else scene.narration
-                            )
-                        ),
+                        "stderr": result.stderr or "",
                     }
                 )
             )
@@ -187,11 +190,16 @@ def generate_lesson_assets(
     remaining = list(lesson.scenes)
     voice = tts_voice_for(lesson.spoken_language)
     for index, scene in enumerate(lesson.scenes):
-        audio_url = scene.audio_url
-        if scene.narration.strip():
+        narration = _spoken_scene_text(lesson, scene)
+        scene_patch: dict[str, Any] = {}
+        if narration != scene.narration:
+            scene_patch["narration"] = narration
+            scene_patch["audio_url"] = None
+        audio_url = scene.audio_url if not scene_patch else None
+        if narration.strip():
             try:
                 audio_url, used = synthesize_narration(
-                    db, scene.narration, provider_name="google", voice=voice
+                    db, narration, provider_name="google", voice=voice
                 )
                 if used != "google":
                     warnings.append("Google Cloud narration was unavailable for a scene.")
@@ -199,18 +207,34 @@ def generate_lesson_assets(
             except Exception as exc:
                 logger.warning("Google Cloud TTS skipped for %s: %s", scene.id, exc)
                 warnings.append("Google Cloud narration is unavailable for a scene.")
-        updated_scenes.append(scene.model_copy(update={"audio_url": audio_url}))
+        scene_patch["audio_url"] = audio_url
+        updated = scene.model_copy(update=scene_patch)
+        updated_scenes.append(updated)
         remaining = remaining[1:]
         if row is not None and index == 0:
             persist_lesson(db, row, lesson.model_copy(update={"scenes": updated_scenes + remaining}), warnings)
     return lesson.model_copy(update={"scenes": updated_scenes})
 
 
+def _spoken_scene_text(lesson: Lesson, scene: Any) -> str:
+    narration = teachable_narration(scene.narration, lesson.spoken_language, scene.narration)
+    if getattr(scene, "type", "") == "intro":
+        return hook_narration(narration, lesson.spoken_language, lesson.topic, lesson.lesson_id)
+    if getattr(scene, "type", "") == "concept":
+        bullets = [str(b).strip() for b in (getattr(scene, "bullets", None) or []) if str(b).strip()]
+        if bullets:
+            joined = ". ".join(bullets)
+            if narration and narration.strip() and narration.strip() not in joined:
+                return f"{narration.strip()}. {joined}"
+            return joined
+    return narration
+
+
 def lesson_needs_google_audio(lesson: Lesson) -> bool:
     voice = tts_voice_for(lesson.spoken_language)
     speed = settings.tts_speed
     for scene in lesson.scenes:
-        expected = tts_hash(scene.narration, voice, speed, cache_provider_key("google"))
+        expected = tts_hash(speech_text(_spoken_scene_text(lesson, scene)), voice, speed, cache_provider_key("google"))
         url = scene.audio_url or ""
         if expected not in url or not audio_file_ready(url):
             return True
@@ -232,6 +256,7 @@ def schedule_google_audio(lesson_id: str) -> None:
             lesson = Lesson.model_validate(row.lesson_json)
             warnings = list(row.warnings or [])
             updated = generate_lesson_assets(db, lesson, warnings, row=row)
+            updated, warnings = _maybe_rerun_sandbox(updated, warnings)
             persist_lesson(db, row, updated, warnings)
         except Exception:
             logger.exception("Google Cloud audio refresh failed for %s", lesson_id)
@@ -254,7 +279,10 @@ def refresh_reel_thumbnail(db: Session, lesson_id: str) -> Lesson:
     lesson = Lesson.model_validate(row.lesson_json)
     from app.services.images.thumbnail import ensure_reel_thumbnail
 
-    url = ensure_reel_thumbnail(lesson.lesson_id, lesson.topic, lesson.topic, lesson.language)
+    _, program = extract_primary_code(lesson.model_dump(mode="json"))
+    url = ensure_reel_thumbnail(
+        lesson.lesson_id, lesson.topic, lesson.topic, lesson.language, program
+    )
     updated = lesson.model_copy(update={"thumbnail_url": url})
     persist_lesson(db, row, updated, list(row.warnings or []))
     return updated
@@ -280,6 +308,71 @@ def schedule_reel_thumbnail(lesson_id: str) -> None:
     threading.Thread(target=_run, daemon=True, name=f"thumb-{lesson_id[-8:]}").start()
 
 
+_SANDBOX_RUNTIME_ERRORS = (
+    "Unable to locate a Java Runtime",
+    "javac is not installed",
+    "java is not installed",
+    "code runner is not reachable",
+    "Code sandbox unavailable",
+    "isolated code runner is not reachable",
+)
+_sandbox_refreshing: set[str] = set()
+_sandbox_lock = threading.Lock()
+
+
+def lesson_needs_sandbox_rerun(lesson: Lesson) -> bool:
+    for scene in lesson.scenes:
+        stderr = getattr(scene, "stderr", "") or ""
+        if any(marker in stderr for marker in _SANDBOX_RUNTIME_ERRORS):
+            return True
+        if isinstance(scene, ExecutionScene):
+            code = (getattr(scene, "code", "") or "").strip()
+            has_output = bool(getattr(scene, "expected_output", None) or getattr(scene, "iterations", None))
+            if code and not has_output:
+                return True
+    return False
+
+
+def _maybe_rerun_sandbox(lesson: Lesson, warnings: list[str]) -> tuple[Lesson, list[str]]:
+    if not lesson_needs_sandbox_rerun(lesson):
+        return lesson, warnings
+    _, program = extract_primary_code(lesson.model_dump(mode="json"))
+    if not program.strip():
+        return lesson, warnings
+    result = execute_in_sandbox(lesson.language, program)
+    updated = _apply_execution(lesson, result)
+    cleaned = [item for item in warnings if "Compilation Error" not in item]
+    if result.compile_error and not result.success:
+        cleaned.append("Compilation Error: the generated example did not compile. Showing the compiler output.")
+    return updated, cleaned
+
+
+def schedule_sandbox_rerun(lesson_id: str) -> None:
+    with _sandbox_lock:
+        if lesson_id in _sandbox_refreshing:
+            return
+        _sandbox_refreshing.add(lesson_id)
+
+    def _run() -> None:
+        db = SessionLocal()
+        try:
+            row = db.get(LessonRow, lesson_id)
+            if row is None or row.status != "ready" or not row.lesson_json:
+                return
+            lesson = Lesson.model_validate(row.lesson_json)
+            warnings = list(row.warnings or [])
+            updated, warnings = _maybe_rerun_sandbox(lesson, warnings)
+            persist_lesson(db, row, updated, warnings)
+        except Exception:
+            logger.exception("sandbox rerun failed for %s", lesson_id)
+        finally:
+            db.close()
+            with _sandbox_lock:
+                _sandbox_refreshing.discard(lesson_id)
+
+    threading.Thread(target=_run, daemon=True, name=f"sandbox-{lesson_id[-8:]}").start()
+
+
 def build_lesson(
     db: Session,
     lesson_id: str,
@@ -288,6 +381,8 @@ def build_lesson(
     level: str,
     format: str = "lesson",
     spoken_language: str = "en",
+    reel_seconds: int = 30,
+    requires_code: bool | None = None,
 ) -> Lesson:
     row = db.get(LessonRow, lesson_id)
     if row is None:
@@ -296,7 +391,17 @@ def build_lesson(
     db.commit()
     warnings: list[str] = []
 
-    plan = plan_lesson(topic, language, level, format=format, spoken_language=spoken_language)
+    if requires_code is None and isinstance(row.lesson_json, dict) and "requires_code" in row.lesson_json:
+        requires_code = bool(row.lesson_json.get("requires_code"))
+    plan = plan_lesson(
+        topic,
+        language,
+        level,
+        format=format,
+        spoken_language=spoken_language,
+        reel_seconds=reel_seconds,
+        requires_code=requires_code,
+    )
     lesson = generate_structured_lesson(plan, lesson_id)
     lesson = _stamp_language(lesson)
 
@@ -336,9 +441,17 @@ def build_lesson(
             lesson = _apply_execution(lesson, result)
         except AppError as exc:
             warnings.append(exc.detail)
+            lesson = _apply_execution(
+                lesson,
+                ExecuteResult(success=False, stdout=[], stderr=exc.detail, execution_time_ms=0),
+            )
         except Exception as exc:
             logger.exception("sandbox failed during lesson build")
             warnings.append(str(exc))
+            lesson = _apply_execution(
+                lesson,
+                ExecuteResult(success=False, stdout=[], stderr=str(exc), execution_time_ms=0),
+            )
 
     if lesson.format.value == "reel" and not lesson.thumbnail_url:
         try:
@@ -347,7 +460,11 @@ def build_lesson(
             lesson = lesson.model_copy(
                 update={
                     "thumbnail_url": ensure_reel_thumbnail(
-                        lesson.lesson_id, lesson.topic, lesson.title, lesson.language
+                        lesson.lesson_id,
+                        lesson.topic,
+                        lesson.topic,
+                        lesson.language,
+                        extract_primary_code(lesson.model_dump(mode="json"))[1],
                     )
                 }
             )
@@ -418,6 +535,7 @@ def list_recent_lessons(db: Session, user_id: str) -> list[dict[str, Any]]:
                 "topic": row.topic,
                 "format": (row.lesson_json or {}).get("format") or "lesson",
                 "thumbnail_url": (row.lesson_json or {}).get("thumbnail_url"),
+                "reel_seconds": (row.lesson_json or {}).get("reel_seconds") or 30,
             }
         )
     return results
@@ -476,7 +594,15 @@ def _update_reel_script(
         patch: dict[str, Any] = {}
         item = updates.get(scene.id)
         if item:
-            narration = _clip_narration(item.narration, scene.narration)
+            narration = teachable_narration(
+                _clip_narration(item.narration, scene.narration),
+                lesson.spoken_language,
+                scene.narration,
+            )
+            if scene.type == "intro":
+                narration = hook_narration(
+                    narration, lesson.spoken_language, lesson.topic, lesson.lesson_id
+                )
             if narration != scene.narration:
                 patch["narration"] = narration
                 patch["audio_url"] = None
@@ -495,13 +621,17 @@ def _update_reel_script(
             "title": strip_duration_copy(lesson.title) or lesson.topic,
         }
     )
+    warnings = [item for item in list(row.warnings or []) if "Compilation Error" not in item]
     if program.strip():
         try:
             result = execute_in_sandbox(lesson.language, program)
             lesson = _apply_execution(lesson, result)
+            if result.success:
+                warnings = [item for item in warnings if "Compilation Error" not in item]
+            elif result.compile_error:
+                warnings.append("Compilation Error: the generated example did not compile. Showing the compiler output.")
         except Exception:
             logger.exception("sandbox run after script edit failed for %s", lesson_id)
-    warnings = list(row.warnings or [])
     persist_lesson(db, row, lesson, warnings)
     schedule_google_audio(lesson_id)
     schedule_reel_thumbnail(lesson_id)

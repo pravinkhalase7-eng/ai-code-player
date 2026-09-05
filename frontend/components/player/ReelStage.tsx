@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
-import { Bookmark, Heart, MessageCircle, Share2 } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
 import { TalkingByteAvatar } from "@/components/tutor/TalkingByteAvatar";
 import { ReelCodePanel } from "@/components/player/ReelCodePanel";
 import { sourceFilename } from "@/lib/language";
 import { beatHighlight, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
 import { isPosterScene, reelCta } from "@/lib/reelCta";
-import { displayTopic } from "@/lib/reelHeadlines";
+import { infoBulletAt, playInfoBulletBlip } from "@/lib/infoReelAnim";
+import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
 import { cn } from "@/lib/utils";
 import type { ExecutionStep, HighlightRange, Lesson, LessonScene } from "@/types/lesson";
 
@@ -20,6 +20,7 @@ export function ReelStage({
   playing,
   currentTime,
   duration,
+  terminalLines = [],
   runError,
   iterations = [],
   sceneIndex = 0,
@@ -52,21 +53,31 @@ export function ReelStage({
   );
   const beat = running ? reelBeatAt(beats, currentTime) : null;
   const activeHighlight = running ? beatHighlight(beat) : highlight;
-  const printed = beat?.output ?? [];
-  const latest = beat?.latest;
-  const narration = scene.narration || caption;
+  const printed = (beat?.output?.length ? beat.output : terminalLines) ?? [];
+  const latest = beat?.latest ?? (printed.length ? printed[printed.length - 1] : undefined);
+  const narration = stripDurationNoise(scene.narration || caption);
+  const spokenCaption = stripDurationNoise(caption);
   const showConsole = running || Boolean(runError || scene.stderr);
   const topic = displayTopic(lesson.topic);
   const poster = isPosterScene(scene.type);
   const thumb = lesson.thumbnail_url || "";
   const cta = reelCta(lesson, scene);
   const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
-  const actions = [
-    { icon: Heart, label: "Like" },
-    { icon: MessageCircle, label: "Comment" },
-    { icon: Bookmark, label: "Save" },
-    { icon: Share2, label: "Share" },
-  ];
+  const isConcept = scene.type === "concept";
+  const infoAnim = useMemo(
+    () => (isConcept ? infoBulletAt(scene.bullets || [], currentTime, duration) : null),
+    [isConcept, scene.bullets, currentTime, duration],
+  );
+  const lastBlip = useRef(-1);
+  useEffect(() => {
+    lastBlip.current = -1;
+  }, [scene.type, sceneIndex]);
+  useEffect(() => {
+    if (!playing || !infoAnim || infoAnim.visibleCount === 0) return;
+    if (infoAnim.active === lastBlip.current) return;
+    lastBlip.current = infoAnim.active;
+    playInfoBulletBlip();
+  }, [playing, infoAnim?.active, infoAnim?.visibleCount]);
 
   return (
     <div className="reel-stage relative flex h-full max-h-full w-auto max-w-full aspect-[9/16] flex-col overflow-hidden rounded-[2rem] border border-white/12 px-3 pb-3 pt-5 shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
@@ -92,7 +103,7 @@ export function ReelStage({
       </div>
 
       <div className="pointer-events-none absolute right-2 top-11 z-30 rounded-2xl bg-white/92 px-1.5 py-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
-        <img src="/techshala-logo.png" alt="TECHSHALA by Pavi" className="h-[4.25rem] w-auto" />
+        <img src="/techshala-logo.png" alt="TECHSHALA by Pavi" className="h-[5.5rem] w-auto" />
       </div>
 
       <div className="relative z-20 mt-3 flex items-center gap-2 px-1">
@@ -103,7 +114,7 @@ export function ReelStage({
       </div>
 
       {poster ? (
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col justify-end px-4 pb-2 pr-14">
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col justify-end px-4 pb-2">
           {scene.type === "summary" ? (
             <div className="rounded-2xl border border-white/10 bg-black/70 px-4 py-3 text-center backdrop-blur-md">
               <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-amber-300">Save this</p>
@@ -126,6 +137,53 @@ export function ReelStage({
             </div>
           )}
         </div>
+      ) : scene.type === "concept" ? (
+        <>
+          <div className="pointer-events-none absolute inset-0 z-[2] overflow-hidden">
+            <div className="info-orb bg-violet-500/45" style={{ width: 190, height: 190, left: -48, top: 110 }} />
+            <div
+              className="info-orb bg-fuchsia-400/30"
+              style={{ width: 150, height: 150, right: -28, top: 260, animationDelay: "1.2s" }}
+            />
+            <div
+              className="info-orb bg-cyan-400/25"
+              style={{ width: 120, height: 120, left: 36, bottom: 250, animationDelay: "2.4s" }}
+            />
+          </div>
+          <header className="relative z-10 shrink-0 px-1 pt-2 text-center">
+            <p className="info-step-chip inline-flex rounded-full border border-violet-200/30 bg-violet-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-violet-100">
+              Explain
+            </p>
+            <h2 className="mt-2 line-clamp-2 text-xl font-semibold leading-6 tracking-tight text-white">{topic}</h2>
+          </header>
+          <div className="relative z-10 flex min-h-0 flex-1 flex-col items-stretch justify-center py-2">
+            <div className="flex max-h-full min-h-0 flex-col gap-2 overflow-y-auto rounded-2xl border border-violet-200/20 bg-[#12071f]/92 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+              {(scene.bullets || []).length ? (
+                (scene.bullets || []).map((item, index) => {
+                  const visible = (infoAnim?.visibleCount ?? 0) > index;
+                  const active = infoAnim?.active === index;
+                  return (
+                    <p
+                      key={`${index}-${item}`}
+                      className={cn(
+                        "info-bullet rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-sm font-medium leading-5 text-zinc-100",
+                        visible && "is-visible",
+                        active && "is-active",
+                      )}
+                    >
+                      <span className="mr-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-400/25 px-1.5 text-[10px] font-bold text-violet-100">
+                        {index + 1}
+                      </span>
+                      {item}
+                    </p>
+                  );
+                })
+              ) : (
+                <p className="text-sm leading-6 text-zinc-200">{narration}</p>
+              )}
+            </div>
+          </div>
+        </>
       ) : (
         <>
           <header className="relative z-10 shrink-0 px-1 pt-2 text-center">
@@ -134,7 +192,7 @@ export function ReelStage({
             </p>
             <h2 className="mt-2 line-clamp-2 text-xl font-semibold leading-6 tracking-tight text-white">{topic}</h2>
           </header>
-          <div className="relative z-10 flex min-h-0 flex-1 flex-col items-stretch justify-center py-2 pr-12">
+          <div className="relative z-10 flex min-h-0 flex-1 flex-col items-stretch justify-center py-2">
             <div className="flex max-h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-cyan-200/20 bg-[#07111f]/92 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
               <ReelCodePanel
                 code={code}
@@ -168,7 +226,7 @@ export function ReelStage({
                   ) : null}
                   <div className="max-h-24 overflow-hidden font-mono text-[11px] leading-4 text-zinc-200">
                     {printed.length === 0 && !runError && !scene.stderr ? (
-                      <p className="text-zinc-500">waiting for print…</p>
+                      <p className="text-zinc-500">waiting for print… (sandbox has no output yet — start code-runner on :8090)</p>
                     ) : (
                       printed.map((line, index) => (
                         <p
@@ -181,7 +239,9 @@ export function ReelStage({
                       ))
                     )}
                     {runError || scene.stderr ? (
-                      <p className="truncate text-red-300">{runError || scene.stderr}</p>
+                      <p className="max-h-20 overflow-y-auto whitespace-pre-wrap text-red-300">
+                        {runError || scene.stderr}
+                      </p>
                     ) : null}
                   </div>
                 </div>
@@ -191,18 +251,7 @@ export function ReelStage({
         </>
       )}
 
-      <div className="pointer-events-none absolute bottom-36 right-2 z-20 flex flex-col items-center gap-4 text-white">
-        {actions.map(({ icon: Icon, label }) => (
-          <div key={label} className="flex flex-col items-center gap-1">
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/45 shadow-[0_8px_20px_rgba(0,0,0,0.35)]">
-              <Icon className="h-5 w-5" />
-            </span>
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-white/80">{label}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="relative z-10 flex shrink-0 items-end gap-3 pr-14">
+      <div className="relative z-10 flex shrink-0 items-end gap-3">
         <TalkingByteAvatar
           speaking={playing}
           narration={narration}
@@ -211,7 +260,7 @@ export function ReelStage({
           size="lg"
         />
         <div className="mb-1 min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/60 px-3 py-2.5 backdrop-blur-md">
-          <p className="line-clamp-3 text-sm font-medium leading-5 text-white">{caption}</p>
+          <p className="line-clamp-3 text-sm font-medium leading-5 text-white">{spokenCaption}</p>
         </div>
       </div>
     </div>

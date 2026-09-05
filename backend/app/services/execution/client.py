@@ -7,6 +7,7 @@ import httpx
 from app.config import settings
 from app.errors import AppError
 from app.schemas.api import ExecuteResult
+from app.services.visualizer import ensure_runnable
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ class ExecutionAgent:
 
 
 def execute_in_sandbox(language: str, code: str) -> ExecuteResult:
-    payload = ExecutionAgent().prepare(language, code)
+    payload = ExecutionAgent().prepare(language, ensure_runnable(language, code))
     url = settings.code_runner_url.rstrip("/") + "/execute"
     try:
         with httpx.Client(timeout=settings.code_execution_timeout + 8) as client:

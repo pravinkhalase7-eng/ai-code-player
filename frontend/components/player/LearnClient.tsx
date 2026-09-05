@@ -50,6 +50,7 @@ export function LearnClient({ lessonId }: { lessonId: string }) {
           if (
             current &&
             current.lesson_id === next.lesson_id &&
+            current.thumbnail_url === next.thumbnail_url &&
             current.scenes.map((scene) => scene.audio_url).join() === next.scenes.map((scene) => scene.audio_url).join()
           ) {
             return current;
@@ -111,6 +112,7 @@ export function LearnClient({ lessonId }: { lessonId: string }) {
         lesson?.level || "beginner",
         lesson?.format || "lesson",
         lesson?.spoken_language || "en",
+        lesson?.reel_seconds || 30,
       );
       router.replace(`/learn/${created.lesson_id}`);
     } catch (err) {

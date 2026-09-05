@@ -74,6 +74,32 @@ def normalize_language(language: str) -> str:
     return "java"
 
 
+_PUBLIC_CLASS = re.compile(r"public\s+class\s+([A-Za-z_]\w*)")
+
+
+def ensure_runnable(language: str, code: str) -> str:
+    """Make Java snippets runnable in Main.java without changing the student's idea."""
+    if normalize_language(language) != "java":
+        return code
+    source = code.replace("\r\n", "\n")
+    match = _PUBLIC_CLASS.search(source)
+    if match and match.group(1) != "Main":
+        source = _PUBLIC_CLASS.sub("public class Main", source, count=1)
+    if "class " not in source:
+        body = "\n".join(
+            f"        {line}" if line.strip() else line
+            for line in source.strip().splitlines()
+        )
+        source = (
+            "public class Main {\n"
+            "    public static void main(String[] args) {\n"
+            f"{body}\n"
+            "    }\n"
+            "}\n"
+        )
+    return source
+
+
 def _print_line(code: str, fallback: int = 4) -> int:
     for index, line in enumerate(code.splitlines(), start=1):
         lowered = line.lower()

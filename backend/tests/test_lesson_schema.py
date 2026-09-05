@@ -243,8 +243,10 @@ def test_reel_svg_thumbnail_includes_topic(tmp_path) -> None:
     dest = tmp_path / "poster.svg"
     write_svg_poster(dest, "Java for loop", "30s: Java For Loop", "java")
     body = dest.read_text()
-    assert "Java for loop" in body
-    assert "BYTE" in body
+    assert "Java For Loop" in body
+    assert body.count("Java for loop") == 0
+    assert "TECHSHALA" in body
+    assert "BYTE" not in body
 
     original = settings.storage_path
     original_provider = settings.image_provider
@@ -252,11 +254,31 @@ def test_reel_svg_thumbnail_includes_topic(tmp_path) -> None:
     settings.image_provider = "local"
     try:
         url = ensure_reel_thumbnail("les_thumb", "Java for loop", "30s: Java For Loop", "java")
-        assert url.endswith(".svg")
+        assert ".svg" in url
         assert (tmp_path / "images" / "thumb_les_thumb.svg").exists()
     finally:
         settings.storage_path = original
         settings.image_provider = original_provider
+
+
+def test_reel_svg_thumbnail_formats_program(tmp_path) -> None:
+    from app.services.images.thumbnail import write_svg_poster
+
+    dest = tmp_path / "poster.svg"
+    program = (
+        "abstract class Car {\n"
+        "    abstract void drive();\n"
+        "}\n"
+        "class SportsCar extends Car {\n"
+        "    void drive() {}\n"
+        "}\n"
+    )
+    write_svg_poster(dest, "Abstract class", "Abstract class", "java", program)
+    body = dest.read_text()
+    assert "abstract class Car" in body
+    assert "xml:space=\"preserve\"" in body
+    assert "\u00a0" in body
+    assert "for (int i" not in body
 
 
 def test_teaching_text_roundtrip_keeps_code() -> None:
@@ -278,11 +300,37 @@ def test_fit_reel_durations_total_about_30_seconds() -> None:
 
     payload = valid_lesson_payload()
     payload["format"] = "reel"
+    payload["reel_seconds"] = 30
     payload["scenes"] = [scene for scene in payload["scenes"] if scene["type"] != "quiz"]
     lesson = Lesson.model_validate(payload)
     fitted = _fit_reel_durations(lesson)
     total = sum(scene.duration for scene in fitted.scenes)
     assert 28.0 <= total <= 32.0
+
+
+def test_fit_reel_durations_scales_to_60_and_90_seconds() -> None:
+    from app.agents.orchestrator import _fit_reel_durations
+
+    payload = valid_lesson_payload()
+    payload["format"] = "reel"
+    payload["scenes"] = [scene for scene in payload["scenes"] if scene["type"] != "quiz"]
+    for seconds in (60, 90, 120):
+        payload["reel_seconds"] = seconds
+        lesson = Lesson.model_validate(payload)
+        fitted = _fit_reel_durations(lesson)
+        total = sum(scene.duration for scene in fitted.scenes)
+        assert seconds - 3 <= total <= seconds + 3, (seconds, total)
+
+
+def test_normalize_reel_seconds_snaps_to_choices() -> None:
+    from app.schemas.lesson import normalize_reel_seconds
+
+    assert normalize_reel_seconds(30) == 30
+    assert normalize_reel_seconds(60) == 60
+    assert normalize_reel_seconds(45) == 30
+    assert normalize_reel_seconds(100) == 90
+    assert normalize_reel_seconds("90") == 90
+    assert normalize_reel_seconds(None) == 30
 
 
 def test_tts_hash_is_stable() -> None:
@@ -291,3 +339,16 @@ def test_tts_hash_is_stable() -> None:
     other = tts_hash("hello", "af_bella", 1.1, "kokoro")
     assert first == second
     assert first != other
+
+
+def test_ensure_runnable_renames_java_class_to_main() -> None:
+    from app.services.visualizer import ensure_runnable
+
+    source = "public class Loop {\n    public static void main(String[] args) {\n        System.out.println(1);\n    }\n}\n"
+    fixed = ensure_runnable("java", source)
+    assert "public class Main" in fixed
+    assert "public class Loop" not in fixed
+    snippet = "System.out.println(2);"
+    wrapped = ensure_runnable("java", snippet)
+    assert "public class Main" in wrapped
+    assert "System.out.println(2);" in wrapped

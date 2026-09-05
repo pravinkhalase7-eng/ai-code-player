@@ -16,6 +16,7 @@ import { downloadBlob, exportReelVideo, fileExtension } from "@/lib/reelExport";
 import { defaultCode, runCommand, sourceFilename } from "@/lib/language";
 import { audioSrc, cn } from "@/lib/utils";
 import { firstMeaningfulHighlight } from "@/lib/codeFocus";
+import { stripDurationNoise } from "@/lib/reelHeadlines";
 import { buildCues, cueAt } from "@/lib/narrationSync";
 import { SPOKEN_LANGUAGES } from "@/lib/spokenLanguage";
 import type { ExecutionStep, HighlightRange, Lesson, LessonScene, RunHelp, TutorExpression } from "@/types/lesson";
@@ -82,7 +83,7 @@ export function LessonPlayer({
     setManualStepping(false);
     setLiveSteps(null);
     setRunHelp(null);
-    setCode(scene?.code?.trim() ? scene.code : exampleCode);
+    setCode(scene?.code?.trim() ? scene.code : exampleCode || "");
     setCurrentTime(0);
     if (scene?.type === "code") {
       setHighlight(firstMeaningfulHighlight(scene.code || exampleCode, scene.highlight_ranges ?? []) ?? null);
@@ -98,11 +99,22 @@ export function LessonPlayer({
   }, [index, scene, exampleCode]);
 
   useEffect(() => {
-    if (lesson.format !== "reel" || thumbUrl) return;
+    if (lesson.format !== "reel") return;
+    const incoming = lesson.thumbnail_url || "";
+    if (incoming.includes("?v=")) {
+      setThumbUrl(incoming);
+      return;
+    }
+    let cancelled = false;
     void generateThumbnail(lesson.lesson_id)
-      .then((payload) => setThumbUrl(payload.lesson.thumbnail_url || ""))
+      .then((payload) => {
+        if (!cancelled) setThumbUrl(payload.lesson.thumbnail_url || "");
+      })
       .catch(() => undefined);
-  }, [lesson.format, lesson.lesson_id, thumbUrl]);
+    return () => {
+      cancelled = true;
+    };
+  }, [lesson.format, lesson.lesson_id, lesson.thumbnail_url]);
 
   const lastPlayed = useRef("");
   const waitingForVoice = playing && !audioSrc(scene?.audio_url);
@@ -497,6 +509,25 @@ export function LessonPlayer({
     }
   }
 
+  async function downloadReel() {
+    if (videoBlob && !exporting) {
+      downloadBlob(videoBlob, `${safeReelName(lesson.topic)}.${fileExtension(videoBlob)}`);
+      setExportLabel("Downloaded — tap Download again anytime");
+      return;
+    }
+    if (reelReview) {
+      try {
+        const next = scriptIsDirty() ? await persistDraft() : lesson;
+        setReelReview(false);
+        await recordReelVideo(next);
+      } catch (err) {
+        setExportLabel(err instanceof Error ? err.message : "Could not export the reel");
+      }
+      return;
+    }
+    await recordReelVideo(lesson);
+  }
+
   async function recordReelVideo(source: Lesson) {
     setScriptBusy("record");
     setExporting(true);
@@ -551,7 +582,7 @@ export function LessonPlayer({
         <div>
           <p className="text-sm uppercase tracking-[0.25em] text-amber-200/80">
             {isReel
-              ? `${spokenLabel} · ${lesson.language} · ${lesson.topic}`
+              ? lesson.requires_code === false ? `${spokenLabel} · Explain · ${lesson.topic}` : `${spokenLabel} · ${lesson.language} · ${lesson.topic}`
               : `Scene ${index + 1} of ${scenes.length} · ${scene.type}`}
           </p>
           <h1 className={cn("font-semibold text-white", isReel ? "text-2xl leading-7" : "text-2xl")}>{isReel ? lesson.topic : lesson.title}</h1>
@@ -564,18 +595,22 @@ export function LessonPlayer({
                   <Pencil className="h-4 w-4" /> Edit script
                 </Button>
               ) : null}
-              <Button size="sm" variant="outline" onClick={() => void makeThumbnail()} disabled={thumbBusy}>
+              <Button size="sm" variant="outline" onClick={() => void makeThumbnail()} disabled={thumbBusy || exporting}>
                 <ImageIcon className="h-4 w-4" /> {thumbBusy ? "Thumbnail…" : "Thumbnail"}
               </Button>
-              {videoBlob ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => downloadBlob(videoBlob, `${safeReelName(lesson.topic)}.${fileExtension(videoBlob)}`)}
-                >
-                  <Download className="h-4 w-4" /> Download
-                </Button>
-              ) : null}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void downloadReel()}
+                disabled={exporting || Boolean(scriptBusy)}
+              >
+                <Download className="h-4 w-4" />
+                {exporting
+                  ? "Exporting…"
+                  : videoBlob
+                    ? "Download"
+                    : "Download video"}
+              </Button>
             </>
           ) : (
             <Button size="sm" onClick={() => void runStudentCode()} disabled={runBusy}>
@@ -602,6 +637,8 @@ export function LessonPlayer({
           onRewrite={() => void rewriteFromProgram()}
           onPlay={() => void playReviewedShort()}
           onRecord={() => void confirmScriptAndRecord()}
+          onDownload={() => void downloadReel()}
+          downloading={exporting}
         />
       ) : (
         <>
@@ -671,7 +708,7 @@ export function LessonPlayer({
             lesson={{ ...lesson, thumbnail_url: thumbUrl || lesson.thumbnail_url }}
             scene={scene}
             code={code}
-            caption={caption}
+            caption={stripDurationNoise(caption)}
             highlight={highlight}
             playing={playing}
             currentTime={currentTime}
@@ -689,7 +726,7 @@ export function LessonPlayer({
           <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(0,1.4fr)]">
             <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
               <TutorAvatar expression={expression} speaking={playing} gesture="point_right" />
-              <p className="mt-4 text-sm leading-6 text-zinc-200">{caption}</p>
+              <p className="mt-4 text-sm leading-6 text-zinc-200">{stripDurationNoise(caption)}</p>
               {highlight?.label ? (
                 <p className="mt-2 text-xs uppercase tracking-[0.2em] text-amber-300/80">
                   Highlighting {highlight.label}
@@ -809,11 +846,14 @@ function scriptLinesFrom(lesson: Lesson): ScriptLine[] {
 }
 
 function primaryCode(lesson: Lesson): string {
+  const explainOnly =
+    lesson.requires_code === false ||
+    (!lesson.scenes.some((item) => item.type === "code" || item.type === "execution") &&
+      lesson.scenes.some((item) => item.type === "concept"));
+  if (explainOnly) return "";
   const scenes = [...lesson.scenes].filter((item) => (item.code || "").trim().length > 20);
   const preferred = scenes.find((item) => item.type === "code") || scenes[0];
-  return (
-    preferred?.code || defaultCode(lesson.language)
-  );
+  return preferred?.code || "";
 }
 
 function safeReelName(topic: string): string {
