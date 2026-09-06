@@ -311,7 +311,12 @@ def extract_primary_code(lesson_json: dict[str, Any]) -> tuple[str, str]:
     try:
         from app.agents.topic_mode import topic_requires_code
 
-        if lesson_json.get("format") == "reel" and not topic_requires_code(str(lesson_json.get("topic") or "")):
+        # Honor explicit Code short; only blank code for inferred Info topics.
+        if (
+            lesson_json.get("requires_code") is not True
+            and lesson_json.get("format") == "reel"
+            and not topic_requires_code(str(lesson_json.get("topic") or ""))
+        ):
             return language, ""
     except Exception:
         pass

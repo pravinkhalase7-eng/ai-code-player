@@ -381,11 +381,11 @@ def plan_lesson(
     plan.reel_seconds = seconds
     inferred = topic_requires_code(topic)
     if fmt == "reel":
-        # Conceptual topics always win — never force a junk for-loop program.
-        if not inferred or requires_code is False:
-            plan.requires_code = False
-        elif requires_code is True:
+        # Explicit dashboard choice wins. Only auto-detect when unset.
+        if requires_code is True:
             plan.requires_code = True
+        elif requires_code is False or not inferred:
+            plan.requires_code = False
         else:
             plan.requires_code = bool(getattr(plan, "requires_code", True))
     else:
@@ -487,14 +487,18 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
     from app.schemas.lesson import ConceptScene, IntroScene, SummaryScene
 
     conceptual = not topic_requires_code(lesson.topic)
-    explain = (
-        lesson.requires_code is False
-        or conceptual
-        or (
-            not any(scene.type in {"code", "execution"} for scene in lesson.scenes)
-            and any(scene.type == "concept" for scene in lesson.scenes)
+    if lesson.requires_code is True:
+        # Code short: keep code/execution scenes even for "what is …" topics.
+        explain = False
+    else:
+        explain = (
+            lesson.requires_code is False
+            or conceptual
+            or (
+                not any(scene.type in {"code", "execution"} for scene in lesson.scenes)
+                and any(scene.type == "concept" for scene in lesson.scenes)
+            )
         )
-    )
     allowed = {"intro", "concept", "summary"} if explain else {"intro", "code", "execution", "terminal", "summary"}
     scenes = [scene for scene in lesson.scenes if scene.type in allowed]
     types = {scene.type for scene in scenes}

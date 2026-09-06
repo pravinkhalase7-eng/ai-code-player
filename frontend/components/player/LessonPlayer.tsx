@@ -882,6 +882,8 @@ function scriptLinesFrom(lesson: Lesson): ScriptLine[] {
 }
 
 function isExplainLesson(lesson: Lesson): boolean {
+  // Explicit Code short must never be treated as Info reel.
+  if (lesson.requires_code === true) return false;
   if (lesson.requires_code === false) return true;
   const types = new Set(lesson.scenes.map((item) => item.type));
   if (types.has("concept") && !types.has("code") && !types.has("execution")) return true;
@@ -889,7 +891,8 @@ function isExplainLesson(lesson: Lesson): boolean {
   const conceptual =
     /\b(rag|agentic|llm|llms|chatgpt|transformer|neural|prompt engineering|embedding|hallucinat|retrieval|vector db|multi-agent)\b/.test(topic) ||
     /^(what is|what.s|whats|explain|define)\b/.test(topic);
-  if (lesson.format === "reel" && conceptual) return true;
+  // Soft heuristics only when requires_code was unset.
+  if (lesson.format === "reel" && conceptual && lesson.requires_code == null) return true;
   if (types.has("concept")) {
     const code = lesson.scenes.map((s) => s.code || "").join("\n");
     if (/for\s+i\s+in\s+range\s*\(\s*[0-9]+\s*\)/.test(code) || /for\s*\(\s*let\s+i\s*=\s*0/.test(code)) {
