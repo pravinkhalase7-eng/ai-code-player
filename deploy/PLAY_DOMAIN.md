@@ -1,54 +1,38 @@
 # Map TECHSHALA to https://play.doxstation.com
 
-Staging app today: `http://187.127.138.86:3010` (API `:8010`).
+Same pattern as **doc-vault**: Jenkins installs host nginx from git — no SSH required for routine deploys.
 
-## 1. DNS (Hostinger / dns-parking for doxstation.com)
+## 1. DNS (one-time, Hostinger)
 
-Create:
+| Type | Name | Value |
+|------|------|-------|
+| A | `play` | `187.127.138.86` |
 
-| Type | Name | Value | TTL |
-|------|------|-------|-----|
-| A | `play` | `187.127.138.86` | 300 |
+Wait until `dig +short play.doxstation.com @8.8.8.8` returns that IP.
 
-Wait until `dig +short play.doxstation.com @8.8.8.8` returns `187.127.138.86`.
-
-## 2. Jenkins deploy with the public URL
+## 2. Jenkins deploy
 
 Build with:
 
-- `PUBLIC_APP_URL` = `https://play.doxstation.com`
-- `DEPLOY_ENV` = `staging` or `production`
-- Secret credential `ai-code-player-env-file` (unchanged)
+- `PUBLIC_APP_URL` = `https://play.doxstation.com` (default)
+- Secret `ai-code-player-env-file`
 
-That sets `CORS_ORIGINS` and `NEXT_PUBLIC_API_URL` to the domain so the browser talks same-origin through Next rewrites.
+Post-Deploy runs `scripts/install_host_nginx.sh`, which:
 
-## 3. TLS reverse proxy on the server (SSH)
+1. Writes `/etc/nginx/sites-available/aicoder` (HTTP bootstrap → `:3010`)
+2. Requests Let's Encrypt if the cert is missing (certbot webroot via Docker)
+3. Switches to HTTPS when the cert exists
+4. Reloads host nginx (HUP) — no SSH
 
-```bash
-sudo apt-get update
-sudo apt-get install -y nginx certbot python3-certbot-nginx
-
-# from the ai-code-player checkout on the box:
-sudo cp deploy/play.doxstation.com.conf /etc/nginx/sites-available/play.doxstation.com
-sudo ln -sf /etc/nginx/sites-available/play.doxstation.com /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-
-# after DNS propagates:
-sudo certbot --nginx -d play.doxstation.com
-```
-
-Certbot will add HTTPS listen 443 and redirect HTTP→HTTPS.
-
-## 4. Smoke check
+## 3. Smoke check
 
 ```bash
 curl -fsS https://play.doxstation.com/ | head
 curl -fsS https://play.doxstation.com/api/v1/health
 ```
 
-Open https://play.doxstation.com in a browser.
-
 ## Notes
 
-- Direct ports `:3010` / `:8010` can stay open for debugging; public users should use the domain only.
-- Compose profile `proxy` (`deploy/nginx.conf` on `:8080`) is optional and separate from this host nginx site.
+- UI stays on host port `3010`; API on `8010`. Public traffic uses the domain only.
+- If certbot fails (DNS not ready), the site still works on **http://play.doxstation.com** until the next successful deploy.
+- Compose profile `proxy` on `:8080` is optional and separate.
