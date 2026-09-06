@@ -37,6 +37,20 @@ function printSteps(scene: LessonScene, code: string): ExecutionStep[] {
   }));
 }
 
+function lineForOutput(code: string, output: string | undefined, fallback: number): number {
+  const lines = (code || "").replace(/\n$/, "").split("\n");
+  const needle = String(output || "").replace(/^"|"$/g, "").trim();
+  if (needle) {
+    for (let index = 0; index < lines.length; index += 1) {
+      if (lines[index].includes(needle)) return index + 1;
+    }
+  }
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/\b(println|print|console\.log)\s*\(/.test(lines[index])) return index + 1;
+  }
+  return fallback;
+}
+
 export function reelBeats(scene: LessonScene, code: string, duration: number): ReelBeat[] {
   const steps = printSteps(scene, code);
   if (!steps.length) return [];
@@ -49,7 +63,7 @@ export function reelBeats(scene: LessonScene, code: string, duration: number): R
     return {
       start: index * slice,
       end: index === steps.length - 1 ? span + 0.05 : (index + 1) * slice,
-      line: highlightLine,
+      line: lineForOutput(code, latest, step.line || highlightLine),
       label: "print",
       description: latest,
       output,

@@ -26,6 +26,12 @@ export function narrowHighlight(code: string, range: HighlightRange | null): Hig
   return { ...range, start_line: from + 1, end_line: to + 1 };
 }
 
+const SPEECH_STOP = new Set(
+  "a an the this that these those is are was were be been being to of in on at for from with as by or and if then else when while for do we you i it its it's into over about just also only more most such than so very can will would should could may might must here there now next first second last line code program method function class return true false null void public private static final new var let const".split(
+    /\s+/,
+  ),
+);
+
 function speechNeedles(speech: string): string[] {
   const text = speech || "";
   const quoted = [...text.matchAll(/`([^`]{2,80})`/g), ...text.matchAll(/"([^"]{2,48})"/g)]
@@ -33,16 +39,41 @@ function speechNeedles(speech: string): string[] {
     .filter((item) => item.length > 1 && !/^(this|that|code|line|here)$/i.test(item));
   const lower = text.toLowerCase();
   const keywords: string[] = [];
-  if (/\bcallbacks?\b/.test(lower)) keywords.push("callback");
-  if (/\bpromises?\b/.test(lower)) keywords.push("Promise", "new Promise");
-  if (/\basync\b/.test(lower)) keywords.push("async");
-  if (/\bawait\b/.test(lower)) keywords.push("await");
-  if (/\.then\b|\bthen\s*\(/.test(lower)) keywords.push(".then");
-  if (/\.catch\b|\bcatch\s*\(/.test(lower)) keywords.push(".catch", "catch");
-  if (/\bresolve\b/.test(lower)) keywords.push("resolve");
-  if (/\breject\b/.test(lower)) keywords.push("reject");
-  if (/\bsettimeout\b/.test(lower)) keywords.push("setTimeout");
-  return [...quoted, ...keywords];
+  const maybe = (re: RegExp, ...tokens: string[]) => {
+    if (re.test(lower)) keywords.push(...tokens);
+  };
+  maybe(/\bcallbacks?\b/, "callback");
+  maybe(/\bpromises?\b/, "Promise", "new Promise");
+  maybe(/\basync\b/, "async");
+  maybe(/\bawait\b/, "await");
+  maybe(/\.then\b|\bthen\s*\(/, ".then");
+  maybe(/\.catch\b|\bcatch\s*\(/, ".catch", "catch");
+  maybe(/\bresolve\b/, "resolve");
+  maybe(/\breject\b/, "reject");
+  maybe(/\bsettimeout\b/, "setTimeout");
+  maybe(/\barraylist\b/, "ArrayList");
+  maybe(/\bhashmap\b|\bmap\b/, "Map", "HashMap");
+  maybe(/\bfor\s+loop\b|\bfor\s+each\b|\bforeach\b|\bfor\b/, "for");
+  maybe(/\bwhile\b/, "while");
+  maybe(/\bprintln\b|system\.out/, "println", "System.out");
+  maybe(/\bprint\b/, "print");
+  maybe(/\bconsole\.log\b/, "console.log");
+  maybe(/\bappend\b/, "append");
+  maybe(/\badd\(/, "add");
+  maybe(/\blength\b/, "length");
+  maybe(/\bsize\b/, "size");
+  maybe(/\blist\b/, "list", "List");
+  maybe(/\bdict\b/, "dict");
+  maybe(/\btuple\b/, "tuple");
+  maybe(/\bset\b/, "set");
+  maybe(/\breturn\b/, "return");
+  maybe(/\bif\b/, "if");
+  maybe(/\belse\b/, "else");
+  // Identifiers / type names spoken in the sentence (ArrayList, names, total, …)
+  const ids = [...text.matchAll(/\b([A-Za-z_][\w.]{1,48})\b/g)]
+    .map((match) => match[1])
+    .filter((id) => id.length > 2 && !SPEECH_STOP.has(id.toLowerCase()));
+  return [...quoted, ...keywords, ...ids];
 }
 
 function lineScore(line: string, needles: string[]): number {
@@ -111,6 +142,92 @@ export function highlightForSpeech(
     end_line: focused,
     start_col: 0,
     label: needles[0],
+  };
+}
+
+
+export function teachingLineNumbers(code: string, ranges: HighlightRange[] = []): number[] {
+  const lines = (code || "").replace(/\n$/, "").split("\n");
+  const out: number[] = [];
+  const pushRange = (from: number, to: number) => {
+    for (let line = from; line <= to; line += 1) {
+      if (!isBoilerplateLine(lines[line - 1] || "")) out.push(line);
+    }
+  };
+  if (ranges.length) {
+    for (const range of ranges) {
+      const narrowed = narrowHighlight(code, range);
+      if (!narrowed) continue;
+      pushRange(narrowed.start_line, narrowed.end_line);
+    }
+  }
+  if (!out.length) pushRange(1, lines.length);
+  return [...new Set(out)];
+}
+
+
+export function highlightFromSpeechHints(
+  code: string,
+  ranges: HighlightRange[],
+  speech: string,
+  key?: string | null,
+): HighlightRange | null {
+  const lines = (code || "").replace(/\n$/, "").split("\n");
+  const spoken = `${key || ""} ${speech || ""}`;
+
+  const lineMention = spoken.match(/\bline\s+#?(\d+)\b/i);
+  if (lineMention) {
+    const line = Math.max(1, Math.min(lines.length, Number(lineMention[1])));
+    if (line && !isBoilerplateLine(lines[line - 1] || "")) {
+      return { start_line: line, end_line: line, start_col: 0, label: `line ${line}` };
+    }
+  }
+
+  const keyText = (key || "").trim();
+  if (keyText) {
+    const byLabel = ranges.find(
+      (range) => (range.label || "").trim().toLowerCase() === keyText.toLowerCase(),
+    );
+    if (byLabel) {
+      const narrowed = narrowHighlight(code, byLabel);
+      if (narrowed) {
+        return { ...narrowed, end_line: narrowed.start_line };
+      }
+    }
+  }
+  return null;
+}
+
+export function progressiveHighlight(
+  code: string,
+  ranges: HighlightRange[],
+  speech: string,
+  cueIndex: number,
+  cueCount = 0,
+  key?: string | null,
+): HighlightRange | null {
+  const hinted = highlightFromSpeechHints(code, ranges, speech, key);
+  if (hinted) return hinted;
+
+  const teaching = teachingLineNumbers(code, ranges);
+  if (!teaching.length) return highlightForSpeech(code, ranges, speech);
+
+  // Spread highlights across teaching lines as narration advances.
+  const total = Math.max(cueCount, cueIndex + 1, 1);
+  const mapped =
+    teaching.length === 1
+      ? 0
+      : Math.round((Math.min(cueIndex, total - 1) / Math.max(1, total - 1)) * (teaching.length - 1));
+  const line = teaching[Math.max(0, Math.min(teaching.length - 1, mapped))];
+  const matched = highlightForSpeech(code, ranges, speech);
+  if (matched && teaching.includes(matched.start_line) && Math.abs(matched.start_line - line) <= 1) {
+    return { ...matched, start_line: matched.start_line, end_line: matched.start_line };
+  }
+  return {
+    start_line: line,
+    end_line: line,
+    start_col: 0,
+    label: `line ${line}`,
   };
 }
 

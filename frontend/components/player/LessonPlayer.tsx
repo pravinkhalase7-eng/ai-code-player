@@ -71,6 +71,7 @@ export function LessonPlayer({
   const [draftLines, setDraftLines] = useState<ScriptLine[]>(() => scriptLinesFrom(lesson));
   const [scriptBusy, setScriptBusy] = useState("");
   const [scriptError, setScriptError] = useState("");
+  const [syncEpoch, setSyncEpoch] = useState(0);
   const pendingPlay = useRef(false);
   const indexRef = useRef(index);
   const playingRef = useRef(playing);
@@ -142,20 +143,28 @@ export function LessonPlayer({
       return;
     }
     el.pause();
-    el.src = url;
-    el.load();
+    const sameClip = lastPlayed.current === key;
+    if (!sameClip) {
+      el.src = url;
+      el.load();
+    }
     el.volume = 1;
     el.muted = false;
     el.playbackRate = rate;
     const applyStart = () => {
-      if (startAt === undefined) return;
+      const at = startAt === undefined ? (sameClip ? 0 : undefined) : startAt;
+      if (at === undefined) return;
       if (Number.isFinite(el.duration) && el.duration > 0) {
-        el.currentTime = Math.min(startAt, el.duration);
+        el.currentTime = Math.min(Math.max(0, at), el.duration);
+        setCurrentTime(el.currentTime);
+      } else {
+        el.currentTime = Math.max(0, at);
         setCurrentTime(el.currentTime);
       }
     };
     el.addEventListener("loadedmetadata", applyStart, { once: true });
     try {
+      applyStart();
       await el.play();
       applyStart();
       lastPlayed.current = key;
@@ -204,7 +213,29 @@ export function LessonPlayer({
     const bounded = Math.min(scenes.length - 1, Math.max(0, nextIndex));
     setIndex(bounded);
     setPlaying(true);
+    if (startAt === 0) {
+      setCurrentTime(0);
+      setSyncEpoch((value) => value + 1);
+      const target = scenes[bounded];
+      if (target?.type === "code") {
+        setHighlight(
+          firstMeaningfulHighlight(target.code || exampleCode, target.highlight_ranges ?? []) ?? null,
+        );
+      }
+    }
     void playClip(scenes[bounded], true, startAt);
+  }
+
+  function replayScene() {
+    setCurrentTime(0);
+    setPlaying(true);
+    setSyncEpoch((value) => value + 1);
+    if (scene?.type === "code") {
+      setHighlight(
+        firstMeaningfulHighlight(scene.code || exampleCode, scene.highlight_ranges ?? []) ?? null,
+      );
+    }
+    void playClip(scene, true, 0);
   }
 
   function seekScene(time: number) {
@@ -291,7 +322,10 @@ export function LessonPlayer({
         setCaption(cue.text);
         if (cue.highlight) {
           setHighlight(cue.highlight);
-        } else if (scene.type !== "code") {
+        } else if (scene.type === "code" || scene.type === "execution") {
+          // Keep last highlight only for a single frame gap; prefer advancing via cues.
+          setHighlight((current) => current);
+        } else {
           setHighlight(null);
         }
         if (cue.expression) setExpression(cue.expression);
@@ -301,7 +335,7 @@ export function LessonPlayer({
     };
     frame = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frame);
-  }, [playing, scene, rate, index, manualStepping]);
+  }, [playing, scene, rate, index, manualStepping, syncEpoch]);
 
   useEffect(() => {
     const percent = scenes.length ? ((index + 1) / scenes.length) * 100 : 0;
@@ -666,7 +700,7 @@ export function LessonPlayer({
         onSeekLesson={seekLesson}
         onPrev={() => goTo(index - 1)}
         onNext={() => goTo(index + 1)}
-        onReplay={() => goTo(index, 0)}
+        onReplay={() => replayScene()}
       />
 
       {resumedFrom > 0 && index === resumedFrom ? (

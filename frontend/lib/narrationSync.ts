@@ -1,4 +1,4 @@
-import { highlightForSpeech } from "@/lib/codeFocus";
+import { highlightForSpeech, progressiveHighlight } from "@/lib/codeFocus";
 import type { HighlightRange, LessonScene, TutorExpression } from "@/types/lesson";
 
 export type SyncCue = {
@@ -30,12 +30,43 @@ function clipDuration(scene: LessonScene, audioDuration?: number): number {
   return estimatedSpeechDuration(scene.narration || "", scene.duration || 8);
 }
 
-function sceneHighlight(scene: LessonScene, speech?: string | null, key?: string | null): HighlightRange | null {
-  if (scene.type !== "code" && scene.type !== "execution") return null;
-  const code = scene.code || "";
-  const ranges = scene.highlight_ranges ?? [];
-  const spoken = [key, speech].filter(Boolean).join(" ");
-  return highlightForSpeech(code, ranges, spoken);
+function weightedCues(
+  scene: LessonScene,
+  parts: { text: string; key?: string | null; expression?: TutorExpression }[],
+  duration: number,
+): SyncCue[] {
+  if (!parts.length) {
+    return [
+      {
+        start: 0,
+        end: duration,
+        text: scene.narration || "",
+        highlight: progressiveHighlight(scene.code || "", scene.highlight_ranges ?? [], scene.narration || "", 0, 1),
+      },
+    ];
+  }
+  const weights = parts.map((part) => Math.max(1, part.text.split(/\s+/).filter(Boolean).length));
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  let cursor = 0;
+  return parts.map((part, index) => {
+    const span = duration * (weights[index] / total);
+    const start = cursor;
+    cursor += span;
+    return {
+      start,
+      end: index === parts.length - 1 ? duration + 0.05 : cursor,
+      text: part.text,
+      expression: part.expression,
+      highlight: progressiveHighlight(
+        scene.code || "",
+        scene.highlight_ranges ?? [],
+        part.text,
+        index,
+        parts.length,
+        part.key,
+      ),
+    };
+  });
 }
 
 export function buildCues(scene: LessonScene, audioDuration?: number): SyncCue[] {
@@ -48,55 +79,75 @@ export function buildCues(scene: LessonScene, audioDuration?: number): SyncCue[]
       start: index * slice,
       end: (index + 1) * slice,
       text: step.description,
-      highlight: highlightForSpeech(code, scene.highlight_ranges ?? [], step.description) || {
-        start_line: step.line,
-        end_line: step.line,
-        start_col: 0,
-        label: step.label || "step",
-      },
+      highlight:
+        progressiveHighlight(code, scene.highlight_ranges ?? [], step.description, index, scene.iterations!.length) || {
+          start_line: step.line || 1,
+          end_line: step.line || 1,
+          start_col: 0,
+          label: step.label || "step",
+        },
       stepIndex: index,
     }));
+  }
+
+  // Code explain: prefer fine-grained sentence cues so the selection keeps moving.
+  if (scene.type === "code") {
+    const segments = scene.segments ?? [];
+    const sentenceParts: { text: string; key?: string | null; expression?: TutorExpression }[] = [];
+    if (segments.length) {
+      for (const segment of segments) {
+        const bits = splitSentences(segment.text || "");
+        if (bits.length) {
+          bits.forEach((text, bitIndex) => {
+            sentenceParts.push({
+              text,
+              key: bitIndex === 0 ? segment.highlight : null,
+              expression: segment.expression,
+            });
+          });
+        } else if (segment.text?.trim()) {
+          sentenceParts.push({
+            text: segment.text,
+            key: segment.highlight,
+            expression: segment.expression,
+          });
+        }
+      }
+    }
+    if (!sentenceParts.length) {
+      for (const text of splitSentences(scene.narration || "")) {
+        sentenceParts.push({ text });
+      }
+    }
+    return weightedCues(scene, sentenceParts, duration);
   }
 
   const segments = scene.segments ?? [];
   if (segments.length >= 1) {
     const last = Math.max(...segments.map((segment) => segment.end), 0.1);
     const scale = duration / last;
-    return segments.map((segment) => ({
+    return segments.map((segment, index) => ({
       start: segment.start * scale,
       end: segment.end * scale,
       text: segment.text,
-      highlight: sceneHighlight(scene, segment.text, segment.highlight),
+      highlight: progressiveHighlight(
+        code,
+        scene.highlight_ranges ?? [],
+        segment.text,
+        index,
+        segments.length,
+        segment.highlight,
+      ),
       expression: segment.expression,
     }));
   }
 
   const sentences = splitSentences(scene.narration || "");
-  if (!sentences.length) {
-    return [
-      {
-        start: 0,
-        end: duration,
-        text: scene.narration || "",
-        highlight: sceneHighlight(scene, scene.narration || ""),
-      },
-    ];
-  }
-
-  const weights = sentences.map((sentence) => Math.max(1, sentence.split(/\s+/).length));
-  const total = weights.reduce((sum, value) => sum + value, 0);
-  let cursor = 0;
-  return sentences.map((text, index) => {
-    const span = duration * (weights[index] / total);
-    const start = cursor;
-    cursor += span;
-    return {
-      start,
-      end: index === sentences.length - 1 ? duration + 0.05 : cursor,
-      text,
-      highlight: sceneHighlight(scene, text),
-    };
-  });
+  return weightedCues(
+    scene,
+    sentences.map((text) => ({ text })),
+    duration,
+  );
 }
 
 export function cueAt(cues: SyncCue[], time: number): SyncCue | null {
