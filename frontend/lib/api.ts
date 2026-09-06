@@ -171,11 +171,38 @@ export function getHealth() {
   }>("/api/v1/health");
 }
 
-export function generateThumbnail(lessonId: string) {
+export function generateThumbnail(lessonId: string, force = false) {
+  const q = force ? "?force=true" : "";
   return request<{ lesson: Lesson; status: string; warnings: string[] }>(
-    `/api/v1/lesson/${lessonId}/thumbnail`,
+    `/api/v1/lesson/${lessonId}/thumbnail${q}`,
     { method: "POST" },
   );
+}
+
+export async function uploadThumbnail(lessonId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/v1/lesson/${lessonId}/thumbnail/upload`, {
+      method: "POST",
+      body: form,
+    });
+  } catch {
+    throw new Error("Could not reach the tutor API. Make sure it is running on port 8010.");
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = body.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join(" ")
+          : body.error || response.statusText || "Request failed";
+    throw new Error(message);
+  }
+  return body as { lesson: Lesson; status: string; warnings: string[] };
 }
 
 export function saveReelScript(

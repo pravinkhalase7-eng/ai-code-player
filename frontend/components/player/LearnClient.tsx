@@ -51,6 +51,7 @@ export function LearnClient({ lessonId }: { lessonId: string }) {
             current &&
             current.lesson_id === next.lesson_id &&
             current.thumbnail_url === next.thumbnail_url &&
+            current.thumbnail_custom === next.thumbnail_custom &&
             current.scenes.map((scene) => scene.audio_url).join() === next.scenes.map((scene) => scene.audio_url).join()
           ) {
             return current;

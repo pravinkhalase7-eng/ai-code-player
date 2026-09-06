@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -38,6 +38,7 @@ from app.services.lesson_service import (
     schedule_sandbox_rerun,
     refresh_reel_thumbnail,
     update_reel_script,
+    upload_custom_thumbnail,
 )
 from app.services.progress_service import get_or_create_progress, update_progress
 from app.services.quiz_service import evaluate_quiz
@@ -139,7 +140,13 @@ def get_lesson(lesson_id: str, db: Session = Depends(get_db)) -> LessonResponse:
         schedule_google_audio(row.id)
     elif lesson_needs_sandbox_rerun(lesson):
         schedule_sandbox_rerun(row.id)
-    if lesson.format.value == "reel" and f"v={THUMB_VERSION}" not in (lesson.thumbnail_url or ""):
+    thumb_url = lesson.thumbnail_url or ""
+    if (
+        lesson.format.value == "reel"
+        and f"v={THUMB_VERSION}" not in thumb_url
+        and not lesson.thumbnail_custom
+        and "thumb_custom_" not in thumb_url
+    ):
         schedule_reel_thumbnail(row.id)
     return LessonResponse(lesson=lesson, status=row.status, warnings=row.warnings or [])
 
@@ -269,11 +276,29 @@ def post_progress(
 
 
 @router.post("/lesson/{lesson_id}/thumbnail", response_model=LessonResponse)
-def post_thumbnail(lesson_id: str, db: Session = Depends(get_db)) -> LessonResponse:
+def post_thumbnail(
+    lesson_id: str,
+    force: bool = Query(False),
+    db: Session = Depends(get_db),
+) -> LessonResponse:
     row = db.get(LessonRow, lesson_id)
     if row is None:
         raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
-    lesson = refresh_reel_thumbnail(db, lesson_id)
+    lesson = refresh_reel_thumbnail(db, lesson_id, force=force)
+    return LessonResponse(lesson=lesson, status=row.status, warnings=row.warnings or [])
+
+
+@router.post("/lesson/{lesson_id}/thumbnail/upload", response_model=LessonResponse)
+async def upload_thumbnail(
+    lesson_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> LessonResponse:
+    row = db.get(LessonRow, lesson_id)
+    if row is None:
+        raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
+    data = await file.read()
+    lesson = upload_custom_thumbnail(db, lesson_id, data, file.content_type)
     return LessonResponse(lesson=lesson, status=row.status, warnings=row.warnings or [])
 
 

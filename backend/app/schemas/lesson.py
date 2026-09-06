@@ -252,6 +252,7 @@ class Lesson(BaseModel):
     scenes: list[LessonScene] = Field(min_length=3, max_length=24)
     code_examples: list[str] = Field(default_factory=list)
     thumbnail_url: str | None = None
+    thumbnail_custom: bool = False
     reel_seconds: int = 30
     requires_code: bool = True
 
@@ -330,6 +331,7 @@ class LessonDraft(BaseModel):
     concepts: list[str] = Field(default_factory=list)
     scenes: list[GenericScene] = Field(min_length=3, max_length=24)
     thumbnail_url: str | None = None
+    thumbnail_custom: bool = False
     reel_seconds: int = 30
     requires_code: bool = True
 

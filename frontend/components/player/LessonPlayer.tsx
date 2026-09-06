@@ -11,7 +11,8 @@ import { Terminal } from "@/components/player/Terminal";
 import { TutorAvatar } from "@/components/tutor/TutorAvatar";
 import { ReelStage } from "@/components/player/ReelStage";
 import { ReelScriptStudio, type ScriptLine } from "@/components/player/ReelScriptStudio";
-import { answerQuiz, executeCode, explainRunError, generateThumbnail, saveProgress, saveReelScript, sendChat } from "@/lib/api";
+import { answerQuiz, executeCode, explainRunError, generateThumbnail, saveProgress, saveReelScript, sendChat, uploadThumbnail } from "@/lib/api";
+import { buildThumbnailPrompt } from "@/lib/thumbnailPrompt";
 import { downloadBlob, exportReelVideo, fileExtension, reelDownloadName } from "@/lib/reelExport";
 import { runCommand, sourceFilename } from "@/lib/language";
 import { audioSrc, cn } from "@/lib/utils";
@@ -103,7 +104,7 @@ export function LessonPlayer({
   useEffect(() => {
     if (lesson.format !== "reel") return;
     const incoming = lesson.thumbnail_url || "";
-    if (incoming.includes("?v=")) {
+    if (lesson.thumbnail_custom || incoming.includes("thumb_custom_") || incoming.includes("?v=")) {
       setThumbUrl(incoming);
       return;
     }
@@ -116,7 +117,7 @@ export function LessonPlayer({
     return () => {
       cancelled = true;
     };
-  }, [lesson.format, lesson.lesson_id, lesson.thumbnail_url]);
+  }, [lesson.format, lesson.lesson_id, lesson.thumbnail_url, lesson.thumbnail_custom]);
 
   const lastPlayed = useRef("");
   const waitingForVoice = playing && !audioSrc(scene?.audio_url);
@@ -454,13 +455,31 @@ export function LessonPlayer({
   async function makeThumbnail() {
     setThumbBusy(true);
     try {
-      const payload = await generateThumbnail(lesson.lesson_id);
+      const payload = await generateThumbnail(lesson.lesson_id, true);
       setThumbUrl(payload.lesson.thumbnail_url || "");
+      onLessonChange?.(payload.lesson);
     } catch (err) {
       setExportLabel(err instanceof Error ? err.message : "Could not generate a thumbnail");
     } finally {
       setThumbBusy(false);
     }
+  }
+
+  async function handleUploadThumbnail(file: File) {
+    setScriptError("");
+    try {
+      const payload = await uploadThumbnail(lesson.lesson_id, file);
+      onLessonChange?.(payload.lesson);
+      setThumbUrl(payload.lesson.thumbnail_url || "");
+    } catch (err) {
+      setScriptError(err instanceof Error ? err.message : "Could not upload thumbnail");
+      throw err;
+    }
+  }
+
+  async function handleCopyThumbnailPrompt(prompt?: string) {
+    const text = prompt || buildThumbnailPrompt(lesson);
+    await navigator.clipboard.writeText(text);
   }
 
   function openScriptStudio() {
@@ -707,7 +726,7 @@ export function LessonPlayer({
 
       {isReel && reelReview ? (
         <ReelScriptStudio
-          lesson={lesson}
+          lesson={{ ...lesson, thumbnail_url: thumbUrl || lesson.thumbnail_url }}
           code={explainOnly ? "" : draftCode}
           lines={draftLines}
           busy={scriptBusy}
@@ -722,6 +741,8 @@ export function LessonPlayer({
           onDownload={() => void downloadReel()}
           downloading={exporting}
           explainOnly={explainOnly}
+          onUploadThumbnail={handleUploadThumbnail}
+          onCopyPrompt={handleCopyThumbnailPrompt}
         />
       ) : (
         <>

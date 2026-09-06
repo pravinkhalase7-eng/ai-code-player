@@ -274,18 +274,79 @@ _thumbnail_refreshing: set[str] = set()
 _thumbnail_lock = threading.Lock()
 
 
-def refresh_reel_thumbnail(db: Session, lesson_id: str) -> Lesson:
+def upload_custom_thumbnail(
+    db: Session,
+    lesson_id: str,
+    file_bytes: bytes,
+    content_type: str | None = None,
+) -> Lesson:
+    row = db.get(LessonRow, lesson_id)
+    if row is None or not row.lesson_json:
+        raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
+    if not file_bytes:
+        raise AppError(400, "Empty upload", "Choose an image file to upload.", "bad_request")
+
+    from app.services.images.thumbnail import images_dir
+
+    ctype = (content_type or "").split(";")[0].strip().lower()
+    ext_map = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/webp": "webp",
+    }
+    ext = ext_map.get(ctype)
+    folder = images_dir()
+    dest_name = f"thumb_custom_{lesson_id}.png"
+    dest = folder / dest_name
+
+    try:
+        from io import BytesIO
+
+        from PIL import Image  # type: ignore
+
+        image = Image.open(BytesIO(file_bytes))
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+        image.save(dest, format="PNG")
+        ext = "png"
+        dest_name = dest.name
+    except Exception:
+        if ext is None:
+            # sniff magic bytes
+            if file_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+                ext = "png"
+            elif file_bytes[:2] == b"\xff\xd8":
+                ext = "jpg"
+            elif file_bytes[:4] == b"RIFF" and file_bytes[8:12] == b"WEBP":
+                ext = "webp"
+            else:
+                ext = "png"
+        dest_name = f"thumb_custom_{lesson_id}.{ext}"
+        dest = folder / dest_name
+        dest.write_bytes(file_bytes)
+
+    url = f"/images/{dest_name}?v=custom"
+    lesson = Lesson.model_validate(row.lesson_json)
+    updated = lesson.model_copy(update={"thumbnail_url": url, "thumbnail_custom": True})
+    persist_lesson(db, row, updated, list(row.warnings or []))
+    return updated
+
+
+def refresh_reel_thumbnail(db: Session, lesson_id: str, *, force: bool = False) -> Lesson:
     row = db.get(LessonRow, lesson_id)
     if row is None or not row.lesson_json:
         raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
     lesson = Lesson.model_validate(row.lesson_json)
+    if lesson.thumbnail_custom and not force:
+        return lesson
     from app.services.images.thumbnail import ensure_reel_thumbnail
 
     _, program = extract_primary_code(lesson.model_dump(mode="json"))
     url = ensure_reel_thumbnail(
         lesson.lesson_id, lesson.topic, lesson.topic, lesson.language, program
     )
-    updated = lesson.model_copy(update={"thumbnail_url": url})
+    updated = lesson.model_copy(update={"thumbnail_url": url, "thumbnail_custom": False})
     persist_lesson(db, row, updated, list(row.warnings or []))
     return updated
 

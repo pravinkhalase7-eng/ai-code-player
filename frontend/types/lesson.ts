@@ -93,6 +93,7 @@ export type Lesson = {
   concepts?: string[];
   scenes: LessonScene[];
   thumbnail_url?: string | null;
+  thumbnail_custom?: boolean;
   reel_seconds?: number;
   requires_code?: boolean;
 };
