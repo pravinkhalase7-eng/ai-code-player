@@ -10,14 +10,89 @@ import { infoBulletAt } from "@/lib/infoReelAnim";
 const WIDTH = 720;
 const HEIGHT = 1280;
 
+export type ReelExportProgress = { scene: number; total: number; label: string };
+
 function pickRecorderMime(): string {
   const types = [
+    "video/mp4",
+    "video/mp4;codecs=avc1,mp4a.40.2",
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm",
-    "video/mp4",
   ];
   return types.find((type) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) || "";
+}
+
+let ffmpegInstance: import("@ffmpeg/ffmpeg").FFmpeg | null = null;
+let ffmpegLoading: Promise<import("@ffmpeg/ffmpeg").FFmpeg> | null = null;
+
+async function getFFmpeg(onLog?: (message: string) => void) {
+  if (ffmpegInstance) return ffmpegInstance;
+  if (ffmpegLoading) return ffmpegLoading;
+  ffmpegLoading = (async () => {
+    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+    const { toBlobURL } = await import("@ffmpeg/util");
+    const ffmpeg = new FFmpeg();
+    ffmpeg.on("log", ({ message }) => onLog?.(message));
+    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm";
+    await ffmpeg.load({
+      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+    });
+    ffmpegInstance = ffmpeg;
+    return ffmpeg;
+  })();
+  try {
+    return await ffmpegLoading;
+  } finally {
+    ffmpegLoading = null;
+  }
+}
+
+function isMp4Blob(blob: Blob): boolean {
+  return /mp4|m4v|quicktime/i.test(blob.type || "");
+}
+
+async function convertBlobToMp4(
+  blob: Blob,
+  onProgress?: (progress: ReelExportProgress) => void,
+): Promise<Blob> {
+  if (isMp4Blob(blob)) return blob;
+  onProgress?.({ scene: 0, total: 0, label: "Converting to MP4…" });
+  const { fetchFile } = await import("@ffmpeg/util");
+  const ffmpeg = await getFFmpeg();
+  const inputName = blob.type.includes("webm") ? "input.webm" : "input.bin";
+  await ffmpeg.writeFile(inputName, await fetchFile(blob));
+  await ffmpeg.exec([
+    "-i",
+    inputName,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-movflags",
+    "+faststart",
+    "output.mp4",
+  ]);
+  const data = await ffmpeg.readFile("output.mp4");
+  try {
+    await ffmpeg.deleteFile(inputName);
+  } catch {
+    /* ignore cleanup errors */
+  }
+  try {
+    await ffmpeg.deleteFile("output.mp4");
+  } catch {
+    /* ignore cleanup errors */
+  }
+  const raw = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data));
+  const bytes = new Uint8Array(raw.byteLength);
+  bytes.set(raw);
+  return new Blob([bytes], { type: "video/mp4" });
 }
 
 async function decodeAudio(ctx: AudioContext, url: string | undefined): Promise<AudioBuffer | null> {
@@ -642,7 +717,6 @@ function roundRect(
   ctx.closePath();
 }
 
-export type ReelExportProgress = { scene: number; total: number; label: string };
 
 export async function exportReelVideo(
   lesson: Lesson,
@@ -720,7 +794,19 @@ export async function exportReelVideo(
     void audioCtx.close();
   }
 
-  return await stopped;
+  const recorded = await stopped;
+  if (isMp4Blob(recorded)) return recorded;
+  try {
+    return await convertBlobToMp4(recorded, onProgress);
+  } catch (error) {
+    console.warn("MP4 conversion failed; falling back to recorded blob", error);
+    onProgress?.({
+      scene: scenes.length,
+      total: scenes.length,
+      label: "Conversion failed — saving original format",
+    });
+    return recorded;
+  }
 }
 
 export function downloadBlob(blob: Blob, filename: string) {
@@ -733,6 +819,12 @@ export function downloadBlob(blob: Blob, filename: string) {
 }
 
 export function fileExtension(blob: Blob): string {
-  if (blob.type.includes("mp4")) return "mp4";
+  if (isMp4Blob(blob) || blob.type.includes("mp4")) return "mp4";
   return "webm";
+}
+
+/** Prefer .mp4 for reel downloads; keep webm only when conversion failed. */
+export function reelDownloadName(topic: string, blob: Blob): string {
+  const slug = topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `reel-${slug || "short"}.${fileExtension(blob)}`;
 }

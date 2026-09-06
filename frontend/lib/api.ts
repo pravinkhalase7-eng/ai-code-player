@@ -61,6 +61,12 @@ export function listLessons() {
   return request<{ lessons: LessonSummary[] }>("/api/v1/lessons");
 }
 
+export function deleteLesson(lessonId: string) {
+  return request<{ ok: boolean; lesson_id: string }>(`/api/v1/lesson/${lessonId}`, {
+    method: "DELETE",
+  });
+}
+
 export function executeCode(language: string, code: string, lessonId?: string) {
   return request<{
     success: boolean;

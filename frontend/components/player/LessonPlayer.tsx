@@ -12,7 +12,7 @@ import { TutorAvatar } from "@/components/tutor/TutorAvatar";
 import { ReelStage } from "@/components/player/ReelStage";
 import { ReelScriptStudio, type ScriptLine } from "@/components/player/ReelScriptStudio";
 import { answerQuiz, executeCode, explainRunError, generateThumbnail, saveProgress, saveReelScript, sendChat } from "@/lib/api";
-import { downloadBlob, exportReelVideo, fileExtension } from "@/lib/reelExport";
+import { downloadBlob, exportReelVideo, fileExtension, reelDownloadName } from "@/lib/reelExport";
 import { runCommand, sourceFilename } from "@/lib/language";
 import { audioSrc, cn } from "@/lib/utils";
 import { firstMeaningfulHighlight } from "@/lib/codeFocus";
@@ -546,8 +546,12 @@ export function LessonPlayer({
 
   async function downloadReel() {
     if (videoBlob && !exporting) {
-      downloadBlob(videoBlob, `${safeReelName(lesson.topic)}.${fileExtension(videoBlob)}`);
-      setExportLabel("Downloaded — tap Download again anytime");
+      downloadBlob(videoBlob, reelDownloadName(lesson.topic, videoBlob));
+      setExportLabel(
+        fileExtension(videoBlob) === "mp4"
+          ? "Downloaded MP4 — tap Download again anytime"
+          : "Downloaded (WebM fallback) — MP4 conversion unavailable",
+      );
       return;
     }
     if (reelReview) {
@@ -584,11 +588,30 @@ export function LessonPlayer({
       }
       const blob = await exportReelVideo(
         { ...source, thumbnail_url: poster || source.thumbnail_url },
-        (progress) => setExportLabel(`Scene ${progress.scene}/${progress.total} · ${progress.label}`),
+        (progress) => {
+          if (/converting to mp4/i.test(progress.label)) {
+            setExportLabel("Converting to MP4…");
+            return;
+          }
+          if (/conversion failed/i.test(progress.label)) {
+            setExportLabel(progress.label);
+            return;
+          }
+          if (progress.total > 0) {
+            setExportLabel(`Scene ${progress.scene}/${progress.total} · ${progress.label}`);
+          } else {
+            setExportLabel(progress.label);
+          }
+        },
       );
       setVideoBlob(blob);
-      setExportLabel("Reel ready — download it");
-      downloadBlob(blob, `${safeReelName(source.topic)}.${fileExtension(blob)}`);
+      const ext = fileExtension(blob);
+      setExportLabel(
+        ext === "mp4"
+          ? "MP4 ready — download it"
+          : "Saved as WebM — MP4 conversion failed on this device",
+      );
+      downloadBlob(blob, reelDownloadName(source.topic, blob));
     } catch (err) {
       setExportLabel(err instanceof Error ? err.message : "Could not generate the reel video");
     } finally {
@@ -606,21 +629,22 @@ export function LessonPlayer({
   return (
     <div
       className={cn(
+        "w-full max-w-full overflow-x-hidden",
         isReel && reelReview
-          ? "flex min-h-[calc(100dvh-3.25rem)] flex-col gap-3"
+          ? "flex min-h-dvh flex-col gap-3 md:min-h-[calc(100dvh-3.25rem)]"
           : isReel
-            ? "flex h-[calc(100dvh-3.25rem)] flex-col gap-2 overflow-hidden"
-            : "grid min-h-[calc(100vh-6rem)] grid-rows-[auto_1fr_auto_auto] gap-4",
+            ? "flex min-h-dvh flex-col gap-2 md:h-[calc(100dvh-3.25rem)] md:min-h-0 md:overflow-hidden"
+            : "grid min-h-dvh grid-rows-[auto_1fr_auto_auto] gap-3 sm:gap-4 md:min-h-[calc(100vh-6rem)]",
       )}
     >
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm uppercase tracking-[0.25em] text-amber-200/80">
+      <header className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs uppercase tracking-[0.25em] text-amber-200/80 sm:text-sm">
             {isReel
               ? lesson.requires_code === false ? `${spokenLabel} · Explain · ${lesson.topic}` : `${spokenLabel} · ${lesson.language} · ${lesson.topic}`
               : `Scene ${index + 1} of ${scenes.length} · ${scene.type}`}
           </p>
-          <h1 className={cn("font-semibold text-white", isReel ? "text-2xl leading-7" : "text-2xl")}>{isReel ? lesson.topic : lesson.title}</h1>
+          <h1 className={cn("font-semibold text-white", isReel ? "text-xl leading-7 sm:text-2xl" : "text-xl sm:text-2xl")}>{isReel ? lesson.topic : lesson.title}</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {isReel ? (
@@ -655,7 +679,30 @@ export function LessonPlayer({
         </div>
       </header>
       {isReel && exportLabel ? (
-        <p className="-mt-2 text-xs text-zinc-400">{exportLabel}</p>
+        <p className="-mt-1 text-xs text-zinc-400 sm:-mt-2">{exportLabel}</p>
+      ) : null}
+
+      {isReel && !reelReview ? (
+        <div className="sticky bottom-3 z-40 -mx-1 flex gap-2 rounded-2xl border border-white/10 bg-zinc-950/90 p-2 shadow-xl backdrop-blur md:hidden">
+          <Button
+            size="sm"
+            variant="outline"
+            className="min-h-11 flex-1"
+            onClick={openScriptStudio}
+            disabled={exporting || Boolean(scriptBusy)}
+          >
+            <Pencil className="h-4 w-4" /> Edit
+          </Button>
+          <Button
+            size="sm"
+            className="min-h-11 flex-1"
+            onClick={() => void downloadReel()}
+            disabled={exporting || Boolean(scriptBusy)}
+          >
+            <Download className="h-4 w-4" />
+            {exporting ? "Exporting…" : videoBlob ? "Download MP4" : "Download"}
+          </Button>
+        </div>
       ) : null}
 
       {isReel && reelReview ? (
@@ -739,7 +786,7 @@ export function LessonPlayer({
       ) : null}
 
       {isReel ? (
-        <div className="mx-auto flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden">
+        <div className="mx-auto flex min-h-0 w-full max-w-full flex-1 items-center justify-center overflow-hidden px-0">
           <ReelStage
             lesson={{ ...lesson, thumbnail_url: thumbUrl || lesson.thumbnail_url }}
             scene={scene}
@@ -759,8 +806,8 @@ export function LessonPlayer({
         </div>
       ) : (
         <>
-          <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(0,1.4fr)]">
-            <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
+          <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(0,1.4fr)]">
+            <section className="rounded-3xl border border-white/10 bg-white/5 p-4 sm:p-5">
               <TutorAvatar expression={expression} speaking={playing} gesture="point_right" />
               <p className="mt-4 text-sm leading-6 text-zinc-200">{stripDurationNoise(caption)}</p>
               {highlight?.label ? (
@@ -909,7 +956,3 @@ function primaryCode(lesson: Lesson): string {
   return preferred?.code || "";
 }
 
-function safeReelName(topic: string): string {
-  const slug = topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  return `reel-${slug || "short"}`;
-}

@@ -27,6 +27,7 @@ from app.services.images.thumbnail import THUMB_VERSION
 from app.services.chat_service import ask_tutor
 from app.services.jobs import create_job, enqueue, resume_lesson_job
 from app.services.lesson_service import (
+    delete_lesson,
     list_recent_lessons,
     queue_lesson,
     record_execution,
@@ -220,6 +221,12 @@ def _pending_lesson(row: LessonRow) -> Lesson:
 def get_lessons(user_id: str | None = None, db: Session = Depends(get_db)) -> dict:
     uid = user_id or settings.default_user_id
     return {"lessons": list_recent_lessons(db, uid)}
+
+
+@router.delete("/lesson/{lesson_id}")
+def remove_lesson(lesson_id: str, db: Session = Depends(get_db)) -> dict:
+    delete_lesson(db, lesson_id)
+    return {"ok": True, "lesson_id": lesson_id}
 
 
 @router.get("/lesson/{lesson_id}/progress", response_model=ProgressResponse)

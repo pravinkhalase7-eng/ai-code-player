@@ -11,8 +11,10 @@ from app.errors import AppError
 from app.models.orm import (
     CodeExample,
     CodeExecution,
+    LessonProgress,
     LessonRow,
     LessonSceneRow,
+    QuizAttempt,
     QuizQuestion,
     User,
 )
@@ -542,6 +544,27 @@ def list_recent_lessons(db: Session, user_id: str) -> list[dict[str, Any]]:
         )
     return results
 
+
+
+def delete_lesson(db: Session, lesson_id: str) -> None:
+    """Remove a lesson from Continue Learning (cascades related rows)."""
+    row = db.get(LessonRow, lesson_id)
+    if row is None:
+        raise AppError(404, "Lesson not found", "That lesson does not exist.", "not_found")
+
+    question_ids = [
+        qid
+        for (qid,) in db.query(QuizQuestion.id).filter(QuizQuestion.lesson_id == lesson_id).all()
+    ]
+    if question_ids:
+        db.query(QuizAttempt).filter(QuizAttempt.question_id.in_(question_ids)).delete(synchronize_session=False)
+    db.query(QuizQuestion).filter(QuizQuestion.lesson_id == lesson_id).delete(synchronize_session=False)
+    db.query(LessonProgress).filter(LessonProgress.lesson_id == lesson_id).delete(synchronize_session=False)
+    db.query(CodeExample).filter(CodeExample.lesson_id == lesson_id).delete(synchronize_session=False)
+    db.query(CodeExecution).filter(CodeExecution.lesson_id == lesson_id).delete(synchronize_session=False)
+    db.query(LessonSceneRow).filter(LessonSceneRow.lesson_id == lesson_id).delete(synchronize_session=False)
+    db.delete(row)
+    db.commit()
 
 def update_reel_script(
     db: Session,

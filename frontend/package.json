@@ -11,6 +11,8 @@
     "render": "remotion render remotion/index.ts LessonComposition out/lesson.mp4"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@monaco-editor/react": "^4.7.0",
     "@remotion/cli": "^4.0.520",
     "@remotion/player": "^4.0.520",

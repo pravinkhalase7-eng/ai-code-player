@@ -135,7 +135,7 @@ export function PlayerTransport({
           step={0.05}
           value={rate}
           onChange={(event) => onRate(Number(event.target.value))}
-          className="h-2 w-40 cursor-pointer appearance-none rounded-full bg-white/10 accent-amber-400"
+          className="h-2 w-full max-w-40 flex-1 cursor-pointer appearance-none rounded-full bg-white/10 accent-amber-400"
           aria-label="Playback speed"
         />
         <span className="w-12 text-xs tabular-nums text-amber-200">{rate.toFixed(2)}x</span>
