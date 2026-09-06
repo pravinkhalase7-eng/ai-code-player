@@ -65,31 +65,44 @@ export function LearnClient({ lessonId }: { lessonId: string }) {
           return;
         }
         if (payload.status !== "ready") {
+          // Soft timeout: stop spinning forever if the worker died mid-run.
+          if (Date.now() - begun > 180000) {
+            setError("This lesson is taking too long. Start a new one, or retry.");
+            return;
+          }
           window.setTimeout(poll, 1500);
           return;
         }
+        // Unblock the player immediately; don't wait on progress.
         if (!progressLoaded.current) {
           progressLoaded.current = true;
-          try {
-            const progress = await getProgress(lessonId);
-            if (!cancelled) {
+          setProgressIndex(0);
+          void getProgress(lessonId)
+            .then((progress) => {
+              if (cancelled) return;
               const startAt =
                 progress.completion_percent >= 99
                   ? 0
                   : Math.max(0, progress.scene_index || 0);
               setProgressIndex(startAt);
-            }
-          } catch {
-            if (!cancelled) setProgressIndex(0);
-          }
+            })
+            .catch(() => undefined);
         }
         const missingAudio = payload.lesson.scenes.some((item) => !item.audio_url);
-        if (missingAudio || Date.now() - begun < 120000) {
+        // Only keep polling briefly for late TTS/audio — not a full 2 minutes once ready.
+        if (missingAudio && Date.now() - begun < 90000) {
           window.setTimeout(poll, 2000);
         }
-      } catch {
+      } catch (err) {
         if (cancelled) return;
-        if (Date.now() - begun < 120000) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Deleted / missing lesson — fail fast instead of "generating" forever.
+        if (/404|not found|does not exist/i.test(message)) {
+          setError("This lesson is gone (maybe cleared). Start a new one from home.");
+          setStatus("failed");
+          return;
+        }
+        if (Date.now() - begun < 60000) {
           window.setTimeout(poll, 2000);
           return;
         }
@@ -157,7 +170,7 @@ export function LearnClient({ lessonId }: { lessonId: string }) {
           {status}
           {elapsed > 0 ? ` · ${elapsed}s` : ""}
         </p>
-        {elapsed >= 90 ? (
+        {elapsed >= 45 ? (
           <div className="mt-4 space-y-3">
             <p className="max-w-md text-sm text-zinc-400">
               This is taking longer than usual. You can wait, or start a fresh lesson.

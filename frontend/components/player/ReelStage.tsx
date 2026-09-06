@@ -2,11 +2,18 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { TalkingByteAvatar } from "@/components/tutor/TalkingByteAvatar";
+import { KaraokeCaption } from "@/components/player/Caption";
+import { buildCues, cueAt } from "@/lib/narrationSync";
 import { ReelCodePanel } from "@/components/player/ReelCodePanel";
+import { HashMapBoard } from "@/components/player/HashMapBoard";
+import { MechanismBoard } from "@/components/player/MechanismBoard";
+import type { HashMapVisual } from "@/types/lesson";
+import { boardStateFromSteps } from "@/lib/hashmapPhase";
 import { sourceFilename } from "@/lib/language";
 import { beatHighlight, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
 import { isPosterScene, reelCta } from "@/lib/reelCta";
-import { infoBulletAt, playInfoBulletBlip } from "@/lib/infoReelAnim";
+import { boardKindLabel, isExplainMotionLesson, synthesizeBoardSteps } from "@/lib/explainerVisuals";
+import { beatsFromSegments, infoBulletAt, infoBulletAtBeats, playInfoBulletBlip } from "@/lib/infoReelAnim";
 import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
 import { cn } from "@/lib/utils";
 import type { ExecutionStep, HighlightRange, Lesson, LessonScene } from "@/types/lesson";
@@ -57,17 +64,117 @@ export function ReelStage({
   const latest = beat?.latest ?? (printed.length ? printed[printed.length - 1] : undefined);
   const narration = stripDurationNoise(scene.narration || caption);
   const spokenCaption = stripDurationNoise(caption);
+  // Same cue clock as LessonPlayer highlights — karaoke must use this window, not the whole scene.
+  const narrationCues = useMemo(() => buildCues(scene, duration), [scene, duration]);
+  const karaokeCue = cueAt(narrationCues, currentTime);
+  const karaokeText = stripDurationNoise(karaokeCue?.text || spokenCaption || scene.narration || "");
+  const karaokeStart = karaokeCue?.start ?? 0;
+  const karaokeEnd = karaokeCue?.end ?? Math.max(duration, karaokeStart + 0.5);
   const showConsole = running || Boolean(runError || scene.stderr);
   const topic = displayTopic(lesson.topic);
-  const poster = isPosterScene(scene.type);
+  const explainMotion = isExplainMotionLesson(lesson);
+  // Code shorts keep static poster intros/summaries; explainer/info always get motion boards.
+  const poster = isPosterScene(scene.type) && !explainMotion;
   const thumb = lesson.thumbnail_url || "";
   const cta = reelCta(lesson, scene);
   const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
-  const isConcept = scene.type === "concept" || ((scene.type === "code" || scene.type === "execution") && (!(code || "").trim() || lesson.requires_code === false));
-  const infoAnim = useMemo(
-    () => (isConcept ? infoBulletAt(scene.bullets || [], currentTime, duration) : null),
-    [isConcept, scene.bullets, currentTime, duration],
+  const isExplainer =
+    lesson.reel_mode === "explainer" ||
+    (lesson.reel_mode !== "info" && Boolean(scene.diagram_steps && scene.diagram_steps.length));
+  const isConcept =
+    scene.type === "concept" ||
+    (explainMotion && (scene.type === "intro" || scene.type === "summary")) ||
+    ((scene.type === "code" || scene.type === "execution") &&
+      (!(code || "").trim() || lesson.requires_code === false));
+  const diagramSteps = useMemo(() => {
+    // Prefer planner diagram_steps/bullets; else synthesize from visual/segments/narration
+    // so kind:none never leaves a blank stage on explainer/info.
+    return synthesizeBoardSteps(scene, lesson);
+  }, [scene, lesson]);
+  const hashmapVisual = useMemo((): HashMapVisual | null => {
+    const raw = scene.visual_diagram;
+    if (raw && raw.kind === "hashmap") return raw;
+    const blob = `${lesson.topic || ""} ${topic || ""}`.toLowerCase();
+    if (isExplainer && /hash\s*map|hashtable|hash\s*table/.test(blob)) {
+      return {
+        kind: "hashmap",
+        capacity: 8,
+        init_code: "Map<String,Integer> map = new HashMap<>();",
+        setup_lines: [],
+        puts: [
+          { code: 'map.put("Mia",95)', key: "Mia", value: "95", hash_bits: "1010", bucket: 2, color: "orange" },
+          { code: 'map.put("Leo",88)', key: "Leo", value: "88", hash_bits: "0101", bucket: 5, color: "blue" },
+          { code: 'map.put("Zoe",92)', key: "Zoe", value: "92", hash_bits: "1010", bucket: 2, color: "green" },
+        ],
+        node_fields: ["key", "value", "hash", "next"],
+      };
+    }
+    return null;
+  }, [scene.visual_diagram, lesson.topic, topic, isExplainer]);
+  const putTitles = useMemo(
+    () => (hashmapVisual?.puts || []).map((p) => p.code || p.key).filter(Boolean),
+    [hashmapVisual],
   );
+  const stepTitles = useMemo(() => diagramSteps.map((s) => s.title), [diagramSteps]);
+  // Prefer diagram phase titles when hashmap explainer has diagram_steps; else put codes
+  const syncTitles =
+    hashmapVisual && diagramSteps.length
+      ? stepTitles
+      : putTitles.length
+        ? putTitles
+        : isExplainer
+          ? stepTitles
+          : scene.bullets || [];
+  const infoAnim = useMemo(() => {
+    if (!isConcept) return null;
+    const segs = scene.segments || [];
+    // When diagram step count differs from narration segments, equal-split steps across
+    // the real clip duration so every phase (e.g. 5 board steps) still appears on screen.
+    if (diagramSteps.length >= 2 && Math.abs(diagramSteps.length - segs.length) >= 1) {
+      return infoBulletAt(stepTitles, currentTime, duration);
+    }
+    // Otherwise lock phases to narration segment clocks (rescaled to clip duration).
+    if ((hashmapVisual || diagramSteps.length) && segs.length >= 2) {
+      const beats = beatsFromSegments(segs, duration);
+      return infoBulletAtBeats(beats, currentTime);
+    }
+    return infoBulletAt(syncTitles, currentTime, duration);
+  }, [
+    isConcept,
+    hashmapVisual,
+    diagramSteps.length,
+    stepTitles,
+    scene.segments,
+    syncTitles,
+    currentTime,
+    duration,
+  ]);
+  const boardState = useMemo(() => {
+    if (!diagramSteps.length) return null;
+    const putCount = hashmapVisual?.puts?.length ?? 0;
+    return boardStateFromSteps(diagramSteps, infoAnim?.active ?? 0, putCount);
+  }, [hashmapVisual, diagramSteps, infoAnim?.active]);
+  const putProgress = useMemo(() => {
+    if (boardState) {
+      // Blend suggested phase progress with intra-beat timing for slide-in feel
+      if (!infoAnim || !infoAnim.beats.length) return boardState.progressHint;
+      const beat = infoAnim.beats[Math.max(0, Math.min(infoAnim.active, infoAnim.beats.length - 1))];
+      if (!beat) return boardState.progressHint;
+      const span = Math.max(0.05, beat.end - beat.start);
+      const local = Math.max(0, Math.min(1, (currentTime - beat.start) / span));
+      if (boardState.phaseKind === "tree") return 1;
+      if (boardState.phaseKind === "hash" || boardState.phaseKind === "index") {
+        return Math.min(boardState.progressHint, 0.15 + local * 0.2);
+      }
+      return Math.max(boardState.progressHint * 0.55, local);
+    }
+    if (!infoAnim || !infoAnim.beats.length) return 1;
+    const beat = infoAnim.beats[Math.max(0, Math.min(infoAnim.active, infoAnim.beats.length - 1))];
+    if (!beat) return 1;
+    const span = Math.max(0.05, beat.end - beat.start);
+    return Math.max(0, Math.min(1, (currentTime - beat.start) / span));
+  }, [boardState, infoAnim, currentTime]);
+  const activePutIndex = boardState ? boardState.activePutIndex : (infoAnim?.active ?? 0);
   const lastBlip = useRef(-1);
   useEffect(() => {
     lastBlip.current = -1;
@@ -80,7 +187,7 @@ export function ReelStage({
   }, [playing, infoAnim?.active, infoAnim?.visibleCount]);
 
   return (
-    <div className="reel-stage relative flex h-full max-h-full w-auto max-w-full aspect-[9/16] flex-col overflow-hidden rounded-[2rem] border border-white/12 px-3 pb-3 pt-5 shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
+    <div className="reel-stage relative flex h-full max-h-full w-auto max-w-full aspect-[9/16] flex-col overflow-hidden rounded-[2rem] border border-white/12 px-3 pb-4 pt-4 shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
       {poster && thumb ? (
         <img src={thumb} alt="" className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover" />
       ) : null}
@@ -140,33 +247,95 @@ export function ReelStage({
       ) : isConcept ? (
         <>
           <div className="pointer-events-none absolute inset-0 z-[2] overflow-hidden">
-            <div className="info-orb bg-violet-500/45" style={{ width: 190, height: 190, left: -48, top: 110 }} />
             <div
-              className="info-orb bg-fuchsia-400/30"
+              className={cn("info-orb", isExplainer ? "bg-cyan-500/45" : "bg-violet-500/45")}
+              style={{ width: 190, height: 190, left: -48, top: 110 }}
+            />
+            <div
+              className={cn("info-orb", isExplainer ? "bg-amber-400/30" : "bg-fuchsia-400/30")}
               style={{ width: 150, height: 150, right: -28, top: 260, animationDelay: "1.2s" }}
             />
             <div
-              className="info-orb bg-cyan-400/25"
+              className={cn("info-orb", isExplainer ? "bg-teal-400/25" : "bg-cyan-400/25")}
               style={{ width: 120, height: 120, left: 36, bottom: 250, animationDelay: "2.4s" }}
             />
           </div>
           <header className="relative z-10 shrink-0 px-1 pt-2 text-center">
-            <p className="info-step-chip inline-flex rounded-full border border-violet-200/30 bg-violet-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-violet-100">
-              Explain
+            <p
+              className={cn(
+                "info-step-chip inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em]",
+                isExplainer || scene.type === "intro" || scene.type === "summary"
+                  ? "border-cyan-200/30 bg-cyan-300/10 text-cyan-100"
+                  : "border-violet-200/30 bg-violet-300/10 text-violet-100",
+              )}
+            >
+              {explainMotion ? boardKindLabel(scene) : isExplainer ? "Explainer" : "Explain"}
             </p>
-            <h2 className="mt-2 line-clamp-2 text-xl font-semibold leading-6 tracking-tight text-white">{topic}</h2>
+            {scene.type === "intro" && currentTime < 2.6 && !diagramSteps[0]?.title ? (
+              <p className="reel-cta-pulse mt-2 inline-flex rounded-full bg-amber-400 px-4 py-1.5 text-sm font-extrabold uppercase tracking-wide text-zinc-950">
+                Wait for it…
+              </p>
+            ) : null}
+            <h2 className="mt-2 line-clamp-2 text-2xl font-extrabold leading-7 tracking-tight text-white">{topic}</h2>
+            {scene.type === "summary" && (scene.takeaways || []).length ? (
+              <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-200/90">
+                End card · {Math.min((infoAnim?.visibleCount ?? 1), (scene.takeaways || []).length)} reveals
+              </p>
+            ) : null}
           </header>
-          <div className="relative z-10 flex min-h-0 flex-1 flex-col items-stretch justify-center py-2">
-            <div className="flex max-h-full min-h-0 flex-col gap-2 overflow-y-auto rounded-2xl border border-violet-200/20 bg-[#12071f]/92 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-              {(scene.bullets || []).length ? (
-                (scene.bullets || []).map((item, index) => {
+      <div className="relative z-20 mt-2 flex shrink-0 items-center gap-3 px-1">
+        <TalkingByteAvatar
+          speaking={playing}
+          narration={narration}
+          currentTime={currentTime}
+          duration={duration}
+          size="xl"
+        />
+        <KaraokeCaption
+          text={karaokeText}
+          currentTime={currentTime}
+          duration={duration}
+          cueStart={karaokeStart}
+          cueEnd={karaokeEnd}
+          segments={scene.segments}
+        />
+      </div>
+          <div className="relative z-10 flex min-h-0 flex-1 flex-col items-stretch justify-center py-1">
+            {isExplainer && hashmapVisual ? (
+              <HashMapBoard
+                visual={hashmapVisual}
+                activePutIndex={activePutIndex}
+                progress={putProgress}
+                topic={topic}
+                phaseLabel={boardState?.phaseLabel}
+                phaseExample={boardState?.phaseExample}
+                phaseKind={boardState?.phaseKind}
+              />
+            ) : isExplainer && diagramSteps.length ? (
+              <MechanismBoard
+                steps={diagramSteps}
+                active={infoAnim?.active ?? 0}
+                progress={putProgress}
+                topic={topic}
+                phaseLabel={boardState?.phaseLabel}
+                phaseExample={boardState?.phaseExample}
+              />
+            ) : (
+            <div
+              className={cn(
+                "flex max-h-full min-h-0 flex-col gap-2 overflow-y-auto rounded-2xl border p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]",
+                "border-violet-200/20 bg-[#12071f]/92",
+              )}
+            >
+              {(diagramSteps.length ? diagramSteps.map((s) => s.title) : scene.bullets || []).length ? (
+                (diagramSteps.length ? diagramSteps.map((s) => s.title) : scene.bullets || []).map((item, index) => {
                   const visible = (infoAnim?.visibleCount ?? 0) > index;
                   const active = infoAnim?.active === index;
                   return (
                     <p
                       key={`${index}-${item}`}
                       className={cn(
-                        "info-bullet rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-sm font-medium leading-5 text-zinc-100",
+                        "info-bullet rounded-xl border border-white/10 bg-black/35 px-3.5 py-2.5 text-[15px] font-semibold leading-5 text-zinc-100",
                         visible && "is-visible",
                         active && "is-active",
                       )}
@@ -182,6 +351,7 @@ export function ReelStage({
                 <p className="text-sm leading-6 text-zinc-200">{narration}</p>
               )}
             </div>
+            )}
           </div>
         </>
       ) : (
@@ -190,9 +360,26 @@ export function ReelStage({
             <p className="inline-flex rounded-full border border-cyan-200/30 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-100">
               {lesson.language}
             </p>
-            <h2 className="mt-2 line-clamp-2 text-xl font-semibold leading-6 tracking-tight text-white">{topic}</h2>
+            <h2 className="mt-2 line-clamp-2 text-2xl font-extrabold leading-7 tracking-tight text-white">{topic}</h2>
           </header>
-          <div className="relative z-10 flex min-h-0 flex-1 flex-col items-stretch justify-center py-2">
+      <div className="relative z-20 mt-2 flex shrink-0 items-center gap-3 px-1">
+        <TalkingByteAvatar
+          speaking={playing}
+          narration={narration}
+          currentTime={currentTime}
+          duration={duration}
+          size="xl"
+        />
+        <KaraokeCaption
+          text={karaokeText}
+          currentTime={currentTime}
+          duration={duration}
+          cueStart={karaokeStart}
+          cueEnd={karaokeEnd}
+          segments={scene.segments}
+        />
+      </div>
+          <div className="relative z-10 flex min-h-0 flex-1 flex-col items-stretch justify-center py-1">
             <div className="flex max-h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-cyan-200/20 bg-[#07111f]/92 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
               <ReelCodePanel
                 code={code}
@@ -224,7 +411,7 @@ export function ReelStage({
                       {beat.stopped ? " · stop" : ""}
                     </p>
                   ) : null}
-                  <div className="max-h-24 overflow-hidden font-mono text-[11px] leading-4 text-zinc-200">
+                  <div className="max-h-28 overflow-hidden font-mono text-[12px] leading-4 text-zinc-200">
                     {printed.length === 0 && !runError && !scene.stderr ? (
                       <p className="text-zinc-500">waiting for print… (sandbox has no output yet — start code-runner on :8090)</p>
                     ) : (
@@ -251,18 +438,6 @@ export function ReelStage({
         </>
       )}
 
-      <div className="relative z-10 flex shrink-0 items-end gap-3">
-        <TalkingByteAvatar
-          speaking={playing}
-          narration={narration}
-          currentTime={currentTime}
-          duration={duration}
-          size="lg"
-        />
-        <div className="mb-1 min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/60 px-3 py-2.5 backdrop-blur-md">
-          <p className="line-clamp-3 text-sm font-medium leading-5 text-white">{spokenCaption}</p>
-        </div>
-      </div>
     </div>
   );
 }

@@ -120,6 +120,11 @@ def resume_lesson_job(db: Session, lesson_id: str) -> None:
                     if isinstance(row.lesson_json, dict) and "requires_code" in row.lesson_json
                     else {}
                 ),
+                **(
+                    {"reel_mode": (row.lesson_json or {}).get("reel_mode")}
+                    if isinstance(row.lesson_json, dict) and (row.lesson_json or {}).get("reel_mode")
+                    else {}
+                ),
             },
         )
     elif match.status in {"completed", "failed"}:
@@ -127,6 +132,20 @@ def resume_lesson_job(db: Session, lesson_id: str) -> None:
         match.error = None
         match.progress = 0
         db.commit()
+    elif match.status == "running":
+        # Uvicorn --reload / crashed threads leave jobs marked running forever.
+        from datetime import datetime, timezone
+
+        updated = match.updated_at
+        try:
+            age_s = (datetime.now(timezone.utc).replace(tzinfo=None) - (updated.replace(tzinfo=None) if getattr(updated, "tzinfo", None) else updated)).total_seconds()
+        except Exception:
+            age_s = 9999
+        if age_s > 120:
+            match.status = "queued"
+            match.progress = 0
+            match.error = None
+            db.commit()
 
     # Stuck queued lessons: prefer an in-process thread so a dead Celery worker cannot block the UI.
     enqueue(match.id, "lesson_generation", force_local=True)

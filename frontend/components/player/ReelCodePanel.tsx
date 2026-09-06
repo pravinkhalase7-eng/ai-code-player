@@ -19,10 +19,10 @@ export function ReelCodePanel({
   useLayoutEffect(() => {
     const pre = preRef.current;
     if (!pre) return;
-    let size = lines.length > 16 ? 11 : 12;
+    let size = lines.length > 16 ? 13 : 15;
     pre.style.fontSize = `${size}px`;
-    pre.style.lineHeight = "1.45";
-    while (size > 8 && pre.scrollWidth > pre.clientWidth + 2) {
+    pre.style.lineHeight = "1.5";
+    while (size > 10 && pre.scrollWidth > pre.clientWidth + 2) {
       size -= 0.25;
       pre.style.fontSize = `${size}px`;
     }
@@ -34,7 +34,7 @@ export function ReelCodePanel({
         <span className="h-2 w-2 rounded-full bg-red-400/80" />
         <span className="h-2 w-2 rounded-full bg-amber-300/80" />
         <span className="h-2 w-2 rounded-full bg-emerald-400/80" />
-        <span className="ml-1 truncate text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-300">
+        <span className="ml-1 truncate text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-300">
           {filename}
         </span>
       </div>

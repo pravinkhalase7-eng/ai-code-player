@@ -27,6 +27,7 @@ from app.services.images.thumbnail import THUMB_VERSION
 from app.services.chat_service import ask_tutor
 from app.services.jobs import create_job, enqueue, resume_lesson_job
 from app.services.lesson_service import (
+    delete_all_lessons,
     delete_lesson,
     list_recent_lessons,
     queue_lesson,
@@ -59,6 +60,7 @@ def create_lesson(payload: LessonCreateRequest, db: Session = Depends(get_db)) -
         spoken_language=payload.spoken_language,
         reel_seconds=payload.reel_seconds,
         requires_code=payload.requires_code,
+        reel_mode=payload.reel_mode,
     )
     return LessonCreateResponse(lesson_id=lesson_id, status="queued", job_id=job_id)
 
@@ -185,6 +187,7 @@ def _pending_lesson(row: LessonRow) -> Lesson:
             topic=row.topic,
             objectives=["Cutting a short"],
             requires_code=not explain,
+            reel_mode=(row.lesson_json or {}).get("reel_mode"),
             scenes=[
                 IntroScene(id="scene_pending", duration=6, narration="Give me a moment while I cut this short."),
                 pending_middle,
@@ -234,6 +237,13 @@ def get_lessons(user_id: str | None = None, db: Session = Depends(get_db)) -> di
 def remove_lesson(lesson_id: str, db: Session = Depends(get_db)) -> dict:
     delete_lesson(db, lesson_id)
     return {"ok": True, "lesson_id": lesson_id}
+
+
+@router.delete("/lessons")
+def remove_all_lessons(db: Session = Depends(get_db)) -> dict:
+    result = delete_all_lessons(db)
+    return {"ok": True, **result}
+
 
 
 @router.get("/lesson/{lesson_id}/progress", response_model=ProgressResponse)

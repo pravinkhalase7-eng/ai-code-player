@@ -15,14 +15,15 @@ export function TalkingByteAvatar({
   narration?: string;
   currentTime?: number;
   duration?: number;
-  size?: "sm" | "lg";
+  size?: "sm" | "lg" | "xl";
   className?: string;
 }) {
   const viseme = visemeAt(narration, currentTime, speaking, duration);
   const mouth = VISEME_MOUTH[viseme];
   const blink = shouldBlink(currentTime);
   const bob = speaking ? Math.sin(currentTime * 6) * 2.2 : 0;
-  const dim = size === "lg" ? "h-[8.25rem] w-[6.25rem]" : "h-16 w-12";
+  const dim =
+    size === "xl" ? "h-[11.5rem] w-[8.75rem]" : size === "lg" ? "h-[8.25rem] w-[6.25rem]" : "h-16 w-12";
 
   return (
     <div className={cn("relative flex flex-col items-center", className)}>
@@ -30,7 +31,7 @@ export function TalkingByteAvatar({
         viewBox="0 0 128 168"
         className={cn(dim, "overflow-visible drop-shadow-[0_12px_32px_rgba(34,211,238,0.42)]")}
         role="img"
-        aria-label="Byte talking"
+        aria-label="Pavi talking"
         style={{ transform: `translateY(${bob}px)` }}
       >
         <ellipse cx="64" cy="160" rx="28" ry="6" fill="rgba(34,211,238,0.18)" />
@@ -52,7 +53,14 @@ export function TalkingByteAvatar({
           fill="#18181b"
         />
       </svg>
-      <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-cyan-100/90">Byte</p>
+      <p
+        className={cn(
+          "mt-1 font-semibold uppercase tracking-[0.28em] text-cyan-100/90",
+          size === "xl" ? "text-xs" : "text-[10px]",
+        )}
+      >
+        Pavi
+      </p>
     </div>
   );
 }

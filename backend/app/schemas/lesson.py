@@ -132,10 +132,36 @@ class IntroScene(BaseScene):
     type: Literal["intro"] = "intro"
 
 
+class DiagramStep(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    detail: str = Field(default="", max_length=240)
+    example: str = Field(default="", max_length=160)
+
+
+class HashMapPutStep(BaseModel):
+    code: str = Field(max_length=120)
+    key: str = Field(max_length=40)
+    value: str = Field(max_length=40)
+    hash_bits: str = Field(default="", max_length=32)
+    bucket: int = Field(ge=0, le=63)
+    color: str = Field(default="orange", max_length=32)
+
+
+class HashMapVisual(BaseModel):
+    kind: Literal["hashmap"] = "hashmap"
+    capacity: int = Field(default=8, ge=4, le=32)
+    init_code: str = Field(default="Map<K,V> map = new HashMap<>();", max_length=160)
+    setup_lines: list[str] = Field(default_factory=list, max_length=8)
+    puts: list[HashMapPutStep] = Field(default_factory=list, max_length=8)
+    node_fields: list[str] = Field(default_factory=lambda: ["key", "value", "hash", "next"])
+
+
 class ConceptScene(BaseScene):
     type: Literal["concept"] = "concept"
     concept_id: str = "for_loop"
     bullets: list[str] = Field(default_factory=list, max_length=8)
+    diagram_steps: list[DiagramStep] = Field(default_factory=list, max_length=8)
+    visual_diagram: HashMapVisual | None = None
 
 
 class CodeScene(BaseScene):
@@ -227,6 +253,7 @@ class TutorPlan(BaseModel):
     greeting: str = Field(min_length=1, max_length=400)
     reel_seconds: int = 30
     requires_code: bool = True
+    reel_mode: str | None = None
 
     @field_validator("spoken_language")
     @classmethod
@@ -237,6 +264,16 @@ class TutorPlan(BaseModel):
     @classmethod
     def _reel_seconds(cls, value: int) -> int:
         return normalize_reel_seconds(value)
+
+    @field_validator("reel_mode")
+    @classmethod
+    def _reel_mode(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = str(value).strip().lower()
+        if cleaned not in {"code", "info", "explainer"}:
+            raise ValueError('reel_mode must be "code", "info", "explainer", or null')
+        return cleaned
 
 
 class Lesson(BaseModel):
@@ -255,6 +292,7 @@ class Lesson(BaseModel):
     thumbnail_custom: bool = False
     reel_seconds: int = 30
     requires_code: bool = True
+    reel_mode: str | None = None
 
     @field_validator("language")
     @classmethod
@@ -270,6 +308,16 @@ class Lesson(BaseModel):
     @classmethod
     def _reel_seconds(cls, value: int) -> int:
         return normalize_reel_seconds(value)
+
+    @field_validator("reel_mode")
+    @classmethod
+    def _reel_mode(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = str(value).strip().lower()
+        if cleaned not in {"code", "info", "explainer"}:
+            raise ValueError('reel_mode must be "code", "info", "explainer", or null')
+        return cleaned
 
     @model_validator(mode="before")
     @classmethod
@@ -317,6 +365,8 @@ class GenericScene(BaseModel):
     bullets: list[str] = Field(default_factory=list)
     takeaways: list[str] = Field(default_factory=list)
     concept_id: str = "for_loop"
+    diagram_steps: list[DiagramStep] = Field(default_factory=list, max_length=8)
+    visual_diagram: HashMapVisual | None = None
 
 
 class LessonDraft(BaseModel):
@@ -334,6 +384,7 @@ class LessonDraft(BaseModel):
     thumbnail_custom: bool = False
     reel_seconds: int = 30
     requires_code: bool = True
+    reel_mode: str | None = None
 
     @field_validator("spoken_language")
     @classmethod

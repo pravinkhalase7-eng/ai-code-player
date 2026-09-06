@@ -61,7 +61,7 @@ export function TutorAvatar({
           <div className="pointer-events-none absolute inset-0 animate-pulse rounded-full bg-amber-300/20" />
         ) : null}
       </motion.div>
-      <p className="mt-2 text-xs font-medium uppercase tracking-[0.2em] text-amber-200/80">Byte</p>
+      <p className="mt-2 text-xs font-medium uppercase tracking-[0.2em] text-amber-200/80">Pavi</p>
     </div>
   );
 }

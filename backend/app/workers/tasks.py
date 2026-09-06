@@ -33,6 +33,7 @@ def run_job(job_id: str, kind: str) -> None:
                 payload.get("spoken_language", "en"),
                 payload.get("reel_seconds", 30),
                 payload.get("requires_code"),
+                payload.get("reel_mode"),
             )
             set_job(
                 db,

@@ -19,7 +19,13 @@ from app.schemas.lesson import (
 )
 from app.services.gemini_client import generate_text, structured_generate
 from app.services.locale import hook_narration, needs_localization, pick_reel_hook, spoken_generation_rules, spoken_locale, strip_duration_copy, uses_spoken_script
-from app.agents.topic_mode import explain_reel_planner_instruction, topic_requires_code
+from app.agents.topic_mode import (
+    explain_reel_planner_instruction,
+    explainer_reel_planner_instruction,
+    topic_requires_code,
+    default_hashmap_visual,
+    topic_is_hashmap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -318,7 +324,11 @@ def invoke_agent(spec: AgentSpec, user_message: str):
         label=spec.name,
     )
     if isinstance(result, LessonDraft):
-        if spec.name == "reel_planner_agent":
+        if spec.name in {
+            "reel_planner_agent",
+            "explain_reel_planner_agent",
+            "explainer_reel_planner_agent",
+        }:
             result.format = LessonFormat.reel
         return lesson_from_draft(result)
     return result
@@ -351,6 +361,7 @@ def plan_lesson(
     spoken_language: str = "en",
     reel_seconds: int = 30,
     requires_code: bool | None = None,
+    reel_mode: str | None = None,
 ) -> TutorPlan:
     fmt = "reel" if format == "reel" else "lesson"
     locale = spoken_locale(spoken_language)
@@ -360,18 +371,26 @@ def plan_lesson(
         f"{spoken_generation_rules(locale.id)}\n"
         f"Topic: {topic}\nProgramming language: {language}\nRequested level: {level}\nFormat: {fmt}\n"
     )
+    mode = (reel_mode or "").strip().lower() or None
+    if mode not in {None, "code", "info", "explainer"}:
+        mode = None
     if fmt == "reel":
         message += (
             f"This is a {seconds}-second catchy short/reel, not a full lesson. "
             "Keep the plan tight and scale spoken depth to that length."
         )
-        if requires_code is False:
+        if mode == "explainer":
             message += (
-                " This is an INFO reel: requires_code=false. "
+                " This is an EXPLAINER reel: requires_code=false, reel_mode=explainer. "
+                "Do NOT plan a program. Teach HOW it works with intro, concept diagram_steps, and summary only."
+            )
+        elif mode == "code" or requires_code is True:
+            message += " This is a CODE short: requires_code=true, reel_mode=code. Include a runnable example."
+        elif mode == "info" or requires_code is False:
+            message += (
+                " This is an INFO reel: requires_code=false, reel_mode=info. "
                 "Do NOT plan a program. Teach the idea with intro, concept bullets, and summary only."
             )
-        elif requires_code is True:
-            message += " This is a CODE short: requires_code=true. Include a runnable example."
     plan = invoke_agent(TUTOR_AGENT, message)
     assert isinstance(plan, TutorPlan)
     if language:
@@ -381,15 +400,24 @@ def plan_lesson(
     plan.reel_seconds = seconds
     inferred = topic_requires_code(topic)
     if fmt == "reel":
-        # Explicit dashboard choice wins. Only auto-detect when unset.
-        if requires_code is True:
-            plan.requires_code = True
-        elif requires_code is False or not inferred:
+        if mode == "explainer":
             plan.requires_code = False
+            plan.reel_mode = "explainer"
+        elif mode == "code" or requires_code is True:
+            plan.requires_code = True
+            plan.reel_mode = "code"
+        elif mode == "info" or requires_code is False:
+            plan.requires_code = False
+            plan.reel_mode = "info"
+        elif not inferred:
+            plan.requires_code = False
+            plan.reel_mode = "info"
         else:
             plan.requires_code = bool(getattr(plan, "requires_code", True))
+            plan.reel_mode = "code" if plan.requires_code else "info"
     else:
         plan.requires_code = True
+        plan.reel_mode = None
     return plan
 
 
@@ -414,8 +442,12 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
         f"concepts={plan.concepts}\n"
         f"greeting={plan.greeting}\n"
         f"requires_code={plan.requires_code}\n"
+        f"reel_mode={getattr(plan, 'reel_mode', None)}\n"
     )
-    if is_reel and not plan.requires_code:
+    plan_mode = (getattr(plan, "reel_mode", None) or "").strip().lower()
+    if is_reel and plan_mode == "explainer":
+        planner = AgentSpec("explainer_reel_planner_agent", explainer_reel_planner_instruction(seconds), LessonDraft, 0.35)
+    elif is_reel and not plan.requires_code:
         planner = AgentSpec("explain_reel_planner_agent", explain_reel_planner_instruction(seconds), LessonDraft, 0.35)
     elif is_reel:
         planner = AgentSpec("reel_planner_agent", reel_planner_instruction(seconds), LessonDraft, 0.35)
@@ -431,6 +463,7 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
     lesson.topic = plan.topic
     lesson.reel_seconds = seconds
     lesson.requires_code = bool(plan.requires_code)
+    lesson.reel_mode = getattr(plan, "reel_mode", None)
     if is_reel:
         title = plan.title or lesson.title
         lesson.title = strip_duration_copy(title) or plan.topic
@@ -483,6 +516,71 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
     return _fit_scene_durations(lesson)
 
 
+
+def _synth_visual_for_scene(scene, lesson) -> dict:
+    """Fill VisualSpec so explainer/info never ship kind=none with empty callouts."""
+    from app.schemas.lesson import VisualSpec
+
+    existing = getattr(scene, "visual", None)
+    kind = getattr(existing, "kind", None) if existing is not None else None
+    callouts = list(getattr(existing, "callouts", None) or []) if existing is not None else []
+    title = (getattr(existing, "title", None) or "") if existing is not None else ""
+    if kind and kind != "none" and callouts:
+        return {}
+
+    st = getattr(scene, "type", None)
+    topic = getattr(lesson, "topic", "") or getattr(lesson, "title", "") or "Concept"
+
+    if not callouts:
+        steps = list(getattr(scene, "diagram_steps", None) or [])
+        if steps:
+            callouts = [
+                str(getattr(s, "title", None) or (s.get("title") if isinstance(s, dict) else s) or "")[:120]
+                for s in steps
+            ]
+            callouts = [c for c in callouts if c.strip()]
+        if not callouts:
+            callouts = [str(b)[:120] for b in (getattr(scene, "bullets", None) or []) if str(b).strip()]
+        if not callouts:
+            callouts = [str(t)[:120] for t in (getattr(scene, "takeaways", None) or []) if str(t).strip()]
+        if not callouts:
+            segs = list(getattr(scene, "segments", None) or [])
+            for seg in segs[:6]:
+                text = getattr(seg, "text", None) if not isinstance(seg, dict) else seg.get("text")
+                text = str(text or "").strip()
+                if text:
+                    callouts.append(text.split(".")[0][:72])
+        if not callouts:
+            narr = str(getattr(scene, "narration", "") or "").strip()
+            parts = [p.strip() for p in narr.replace("!", ".").replace("?", ".").split(".") if len(p.strip()) > 12]
+            callouts = [p[:72] for p in parts[:4]]
+
+    if st == "intro":
+        new_kind = "hook"
+        title = title or f"Hook · {topic}"[:80]
+    elif st == "summary":
+        new_kind = "takeaway"
+        title = title or f"Takeaway · {topic}"[:80]
+    elif st == "concept":
+        new_kind = "board" if list(getattr(scene, "diagram_steps", None) or []) else "bullets"
+        title = title or f"{topic}"[:80]
+    else:
+        new_kind = kind if kind and kind != "none" else "board"
+        title = title or topic[:80]
+
+    if not callouts:
+        callouts = [topic[:72], "Watch the stages", "Save this short"]
+
+    return {
+        "visual": VisualSpec(
+            kind=new_kind or "board",
+            title=title[:120],
+            callouts=callouts[:8],
+            particles=True,
+        )
+    }
+
+
 def _normalize_reel(lesson: Lesson) -> Lesson:
     from app.schemas.lesson import ConceptScene, IntroScene, SummaryScene
 
@@ -532,6 +630,8 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
             ),
         )
     if explain:
+        from app.schemas.lesson import DiagramStep
+
         cleaned = []
         for scene in scenes:
             patch: dict = {}
@@ -547,14 +647,49 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
                 patch["stderr"] = ""
             if getattr(scene, "iterations", None):
                 patch["iterations"] = []
+            if scene.type == "concept":
+                steps = list(getattr(scene, "diagram_steps", None) or [])
+                bullets = list(getattr(scene, "bullets", None) or [])
+                # Only synthesize diagram_steps for Explainer mode so Info reels keep bullet UI.
+                if getattr(lesson, "reel_mode", None) == "explainer" and not steps and bullets:
+                    patch["diagram_steps"] = [
+                        DiagramStep(title=str(b)[:120], detail="") for b in bullets if str(b).strip()
+                    ]
+                elif steps and not bullets:
+                    patch["bullets"] = [
+                        (getattr(s, "title", None) or (s.get("title") if isinstance(s, dict) else str(s)))[:120]
+                        for s in steps
+                    ]
+                # HashMap explainer: never fall back to list UI — synthesize board if planner omitted it.
+                if getattr(lesson, "reel_mode", None) == "explainer" and topic_is_hashmap(
+                    getattr(lesson, "topic", "") or ""
+                ):
+                    existing = getattr(scene, "visual_diagram", None)
+                    kind = getattr(existing, "kind", None) if existing is not None else (
+                        existing.get("kind") if isinstance(existing, dict) else None
+                    )
+                    if kind != "hashmap":
+                        from app.schemas.lesson import HashMapVisual
+
+                        patch["visual_diagram"] = HashMapVisual.model_validate(default_hashmap_visual())
+            # Always fill visual payloads for explainer/info so runtime never sees kind=none blanks.
+            vis_patch = _synth_visual_for_scene(scene, lesson)
+            if vis_patch:
+                patch.update(vis_patch)
             cleaned.append(scene.model_copy(update=patch) if patch else scene)
         scenes = cleaned
+    mode = getattr(lesson, "reel_mode", None)
+    if explain and not mode:
+        mode = "info"
+    if not explain:
+        mode = mode or "code"
     return lesson.model_copy(
         update={
             "format": LessonFormat.reel,
             "scenes": scenes,
             "code_examples": [] if explain else list(lesson.code_examples or []),
             "requires_code": False if explain else bool(lesson.requires_code),
+            "reel_mode": mode,
         }
     )
 
@@ -565,6 +700,16 @@ def gather_teaching_texts(lesson: Lesson) -> list[str]:
         texts.append(scene.narration)
         texts.extend(segment.text for segment in scene.segments)
         texts.extend(list(getattr(scene, "bullets", None) or []))
+        for step in list(getattr(scene, "diagram_steps", None) or []):
+            title = getattr(step, "title", None) or (step.get("title") if isinstance(step, dict) else None)
+            detail = getattr(step, "detail", None) or (step.get("detail") if isinstance(step, dict) else None)
+            example = getattr(step, "example", None) or (step.get("example") if isinstance(step, dict) else None)
+            if title:
+                texts.append(str(title))
+            if detail:
+                texts.append(str(detail))
+            if example:
+                texts.append(str(example))
         texts.extend(list(getattr(scene, "takeaways", None) or []))
         question = getattr(scene, "question", None)
         if question:
@@ -592,6 +737,21 @@ def scatter_teaching_texts(lesson: Lesson, texts: list[str]) -> Lesson:
         bullets = getattr(scene, "bullets", None)
         if bullets:
             updates["bullets"] = [next(cursor) for _ in bullets]
+        steps = list(getattr(scene, "diagram_steps", None) or [])
+        if steps:
+            from app.schemas.lesson import DiagramStep
+
+            rebuilt = []
+            for step in steps:
+                raw_title = getattr(step, "title", None) if not isinstance(step, dict) else step.get("title")
+                raw_detail = getattr(step, "detail", None) if not isinstance(step, dict) else step.get("detail")
+                raw_example = getattr(step, "example", None) if not isinstance(step, dict) else step.get("example")
+                # Mirror gather_teaching_texts: emit title/detail/example if truthy.
+                title = next(cursor)[:120] if raw_title else str(raw_title or "Step")[:120]
+                detail = next(cursor)[:240] if raw_detail else ""
+                example = next(cursor)[:160] if raw_example else ""
+                rebuilt.append(DiagramStep(title=title or "Step", detail=detail, example=example))
+            updates["diagram_steps"] = rebuilt
         takeaways = getattr(scene, "takeaways", None)
         if takeaways:
             updates["takeaways"] = [next(cursor) for _ in takeaways]
@@ -679,6 +839,25 @@ def _localize_lesson(lesson: Lesson) -> Lesson:
         return lesson
 
 
+
+def _rescale_scene_segments(scene, duration: float):
+    """Stretch/squeeze narration segments so the last end matches scene duration."""
+    segments = list(getattr(scene, "segments", None) or [])
+    if not segments or duration <= 0.2:
+        return scene
+    last = max(float(getattr(s, "end", 0) or 0) for s in segments) or 0.0
+    if last <= 0.05:
+        return scene
+    scale = duration / last
+    updated = []
+    for seg in segments:
+        start = round(float(seg.start or 0) * scale, 2)
+        end = round(float(seg.end or 0) * scale, 2)
+        updated.append(seg.model_copy(update={"start": start, "end": max(start + 0.05, end)}))
+    if updated:
+        updated[-1] = updated[-1].model_copy(update={"end": round(duration, 2)})
+    return scene.model_copy(update={"segments": updated})
+
 def _fit_scene_durations(lesson: Lesson) -> Lesson:
     if lesson.format == LessonFormat.reel:
         return _fit_reel_durations(lesson)
@@ -699,6 +878,7 @@ def _fit_reel_durations(lesson: Lesson) -> Lesson:
     scale_ratio = target / 30.0
     caps = {
         "intro": (5.5 * scale_ratio, 8.0 * scale_ratio),
+        "concept": (10.0 * scale_ratio, 16.0 * scale_ratio),
         "code": (9.0 * scale_ratio, 14.0 * scale_ratio),
         "execution": (5.5 * scale_ratio, 8.0 * scale_ratio),
         "terminal": (4.0 * scale_ratio, 6.0 * scale_ratio),
@@ -727,6 +907,8 @@ def _fit_reel_durations(lesson: Lesson) -> Lesson:
             )
             for scene in updated
         ]
+    # Keep cue clocks aligned with fitted durations (avoids 34s segments on a 19s scene).
+    updated = [_rescale_scene_segments(scene, float(scene.duration)) for scene in updated]
     return lesson.model_copy(update={"scenes": updated})
 
 

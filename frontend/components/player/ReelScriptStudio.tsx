@@ -200,11 +200,11 @@ export function ReelScriptStudio({
         </Button>
         <Button type="button" variant="outline" onClick={onRecord} disabled={locked}>
           <Film className="h-4 w-4" />
-          {busy === "save" ? "Saving voice…" : busy === "record" ? "Recording video…" : "Record video"}
+          {busy === "save" || busy === "voice" ? "Saving voice…" : busy === "record" ? "Recording video…" : "Record video"}
         </Button>
         <Button type="button" onClick={onPlay} disabled={locked}>
           <Play className="h-4 w-4" />
-          {busy === "save" ? "Saving voice…" : "Play this short"}
+          {busy === "save" ? "Saving…" : busy === "voice" ? "Recording voice…" : "Play this short"}
         </Button>
       </div>
     </div>

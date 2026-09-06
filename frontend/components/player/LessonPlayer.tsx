@@ -11,7 +11,7 @@ import { Terminal } from "@/components/player/Terminal";
 import { TutorAvatar } from "@/components/tutor/TutorAvatar";
 import { ReelStage } from "@/components/player/ReelStage";
 import { ReelScriptStudio, type ScriptLine } from "@/components/player/ReelScriptStudio";
-import { answerQuiz, executeCode, explainRunError, generateThumbnail, saveProgress, saveReelScript, sendChat, uploadThumbnail } from "@/lib/api";
+import { answerQuiz, executeCode, explainRunError, generateThumbnail, getLesson, saveProgress, saveReelScript, sendChat, uploadThumbnail } from "@/lib/api";
 import { buildThumbnailPrompt } from "@/lib/thumbnailPrompt";
 import { downloadBlob, exportReelVideo, fileExtension, reelDownloadName } from "@/lib/reelExport";
 import { runCommand, sourceFilename } from "@/lib/language";
@@ -307,12 +307,25 @@ export function LessonPlayer({
     const tick = () => {
       const audio = audioRef.current;
       if (audio && Number.isFinite(audio.duration) && audio.duration > 0.4) {
-        lockedDuration = audio.duration;
-        setClipDuration(audio.duration);
+        const segEnds = (scene.segments || []).map((s) => Number(s.end) || 0);
+        const lastSegEnd = segEnds.length ? Math.max(...segEnds) : 0;
+        // Prefer real WAV length. Only trim huge trailing TTS silence vs cue clocks.
+        if (lastSegEnd > 1 && audio.duration > lastSegEnd + 8) {
+          lockedDuration = lastSegEnd + 0.6;
+        } else {
+          lockedDuration = audio.duration;
+        }
+        setClipDuration(lockedDuration);
       }
       const cues = buildCues(scene, lockedDuration);
       let time = 0;
-      if (audio && !audio.paused && Number.isFinite(audio.currentTime) && audio.currentTime > 0.05) {
+      // Prefer real WAV clock whenever audio has advanced — wall-clock drift breaks karaoke.
+      if (
+        audio &&
+        Number.isFinite(audio.currentTime) &&
+        audio.readyState >= 2 &&
+        (audio.currentTime > 0.02 || !audio.paused)
+      ) {
         time = audio.currentTime;
       } else {
         time = ((Date.now() - speechStarted) / 1000) * rate;
@@ -510,19 +523,72 @@ export function LessonPlayer({
     setThumbUrl(payload.lesson.thumbnail_url || "");
     setDraftCode(primaryCode(payload.lesson) || draftCode);
     setDraftLines(scriptLinesFrom(payload.lesson));
+    setVideoBlob(null);
+    setExportLabel("");
     return payload.lesson;
+  }
+
+  async function unlockAudioGesture() {
+    const el = audioRef.current;
+    if (!el) return;
+    try {
+      el.muted = true;
+      if (!el.src) {
+        el.src =
+          "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+      }
+      await el.play();
+      el.pause();
+      el.currentTime = 0;
+    } catch {
+      // Autoplay unlock best-effort; needsGesture UI covers failures.
+    } finally {
+      el.muted = false;
+    }
+  }
+
+  async function waitForLessonAudio(seed: Lesson, timeoutMs = 90000): Promise<Lesson> {
+    let current = seed;
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const missing = current.scenes.some(
+        (item) => Boolean((item.narration || "").trim()) && !audioSrc(item.audio_url),
+      );
+      if (!missing) return current;
+      await new Promise((resolve) => window.setTimeout(resolve, 1200));
+      const payload = await getLesson(current.lesson_id);
+      current = payload.lesson;
+      onLessonChange?.(current);
+      setThumbUrl(current.thumbnail_url || "");
+      setDraftCode(primaryCode(current) || draftCode);
+      setDraftLines(scriptLinesFrom(current));
+    }
+    return current;
   }
 
   async function playReviewedShort() {
     setScriptError("");
+    // Keep a user-gesture media unlock before any network await (browser autoplay rules).
+    await unlockAudioGesture();
     try {
+      let next = lesson;
       if (scriptIsDirty()) {
         setScriptBusy("save");
-        await persistDraft();
+        next = await persistDraft();
+        setVideoBlob(null);
+        setScriptBusy("voice");
+        next = await waitForLessonAudio(next);
       }
-      pendingPlay.current = true;
+      lastPlayed.current = "";
+      pendingPlay.current = false;
       setIndex(0);
+      setCurrentTime(0);
+      setSyncEpoch((value) => value + 1);
       setReelReview(false);
+      setNeedsGesture(false);
+      setPlaying(true);
+      // Play the saved lesson directly (avoid stale scene + lost click-gesture races).
+      void playClip(next.scenes[0], true);
     } catch (err) {
       setScriptError(err instanceof Error ? err.message : "Could not save the script");
     } finally {
@@ -554,7 +620,12 @@ export function LessonPlayer({
     setScriptBusy("save");
     setScriptError("");
     try {
-      const next = scriptIsDirty() ? await persistDraft() : lesson;
+      let next = lesson;
+      if (scriptIsDirty()) {
+        next = await persistDraft();
+        setScriptBusy("voice");
+        next = await waitForLessonAudio(next);
+      }
       setReelReview(false);
       await recordReelVideo(next);
     } catch (err) {
@@ -660,7 +731,11 @@ export function LessonPlayer({
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-[0.25em] text-amber-200/80 sm:text-sm">
             {isReel
-              ? lesson.requires_code === false ? `${spokenLabel} · Explain · ${lesson.topic}` : `${spokenLabel} · ${lesson.language} · ${lesson.topic}`
+              ? lesson.reel_mode === "explainer"
+                ? `${spokenLabel} · Explainer · ${lesson.topic}`
+                : lesson.requires_code === false
+                  ? `${spokenLabel} · Explain · ${lesson.topic}`
+                  : `${spokenLabel} · ${lesson.language} · ${lesson.topic}`
               : `Scene ${index + 1} of ${scenes.length} · ${scene.type}`}
           </p>
           <h1 className={cn("font-semibold text-white", isReel ? "text-xl leading-7 sm:text-2xl" : "text-xl sm:text-2xl")}>{isReel ? lesson.topic : lesson.title}</h1>
@@ -790,13 +865,13 @@ export function LessonPlayer({
           )}
         >
           <Volume2 className="h-4 w-4" />
-          {isReel ? "Tap to play Byte’s voice" : "Click to hear Byte — uses Google Cloud Chirp, not the browser voice"}
+          {isReel ? "Tap to play Pavi’s voice" : "Click to hear Pavi — uses Google Cloud Chirp, not the browser voice"}
         </button>
       ) : null}
 
       {waitingForVoice ? (
         <p className="rounded-xl border border-amber-300/20 bg-amber-400/10 px-4 py-2 text-sm text-amber-100">
-          Preparing Byte’s natural voice… playback starts as soon as the audio file is ready.
+          Preparing Pavi’s natural voice… playback starts as soon as the audio file is ready.
         </p>
       ) : null}
 
@@ -853,7 +928,7 @@ export function LessonPlayer({
                         setExpression("explaining");
                       }}
                     >
-                      Apply Byte’s fix
+                      Apply Pavi’s fix
                     </Button>
                   ) : null}
                 </div>
@@ -925,7 +1000,7 @@ export function LessonPlayer({
             <div className="space-y-2 text-sm">
               {messages.slice(-4).map((item, messageIndex) => (
                 <p key={`${item.role}-${messageIndex}`} className={item.role === "tutor" ? "text-amber-100" : "text-zinc-300"}>
-                  <span className="font-semibold">{item.role === "tutor" ? "Byte" : "You"}: </span>
+                  <span className="font-semibold">{item.role === "tutor" ? "Pavi" : "You"}: </span>
                   {item.text}
                 </p>
               ))}
@@ -951,7 +1026,8 @@ function scriptLinesFrom(lesson: Lesson): ScriptLine[] {
 
 function isExplainLesson(lesson: Lesson): boolean {
   // Explicit Code short must never be treated as Info reel.
-  if (lesson.requires_code === true) return false;
+  if (lesson.requires_code === true && lesson.reel_mode !== "explainer" && lesson.reel_mode !== "info") return false;
+  if (lesson.reel_mode === "explainer" || lesson.reel_mode === "info") return true;
   if (lesson.requires_code === false) return true;
   const types = new Set(lesson.scenes.map((item) => item.type));
   if (types.has("concept") && !types.has("code") && !types.has("execution")) return true;

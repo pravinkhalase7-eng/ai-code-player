@@ -1,10 +1,12 @@
 import type { HighlightRange, Lesson, LessonScene } from "@/types/lesson";
 import { audioSrc } from "@/lib/utils";
 import { visemeAt, VISEME_MOUTH } from "@/lib/viseme";
+import { activeWordIndex, buildKaraokeWords, karaokeWindow } from "@/lib/karaokeCaption";
 import { buildCues, cueAt } from "@/lib/narrationSync";
 import { beatHighlight, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
 import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
 import { isPosterScene, reelCta } from "@/lib/reelCta";
+import { isExplainMotionLesson, synthesizeBoardSteps } from "@/lib/explainerVisuals";
 import { infoBulletAt } from "@/lib/infoReelAnim";
 
 const WIDTH = 720;
@@ -309,8 +311,8 @@ function drawIdeWindow(
   const lines = code.replace(/\n$/, "").split("\n");
   const innerW = w - 28;
   const innerH = codeH - 16;
-  let fontSize = 15;
-  while (fontSize > 9) {
+  let fontSize = 17;
+  while (fontSize > 11) {
     ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
     const maxW = Math.max(0, ...lines.map((line) => ctx.measureText((line || " ").slice(0, 140)).width));
     const totalH = lines.length * (fontSize + 6);
@@ -445,7 +447,11 @@ function drawByte(ctx: CanvasRenderingContext2D, x: number, y: number, scale: nu
 
 function scheduleConceptBlips(audioCtx: AudioContext, dest: MediaStreamAudioDestinationNode, scene: LessonScene, duration: number) {
   if (scene.type !== "concept") return;
-  const beats = infoBulletAt(scene.bullets || [], 0, duration).beats;
+  const titles =
+    (scene.diagram_steps || []).map((s) => String(s.title || "").trim()).filter(Boolean).length
+      ? (scene.diagram_steps || []).map((s) => String(s.title || "").trim()).filter(Boolean)
+      : scene.bullets || [];
+  const beats = infoBulletAt(titles, 0, duration).beats;
   for (const beat of beats) {
     const when = audioCtx.currentTime + Math.max(0.02, beat.start);
     const osc = audioCtx.createOscillator();
@@ -463,27 +469,418 @@ function scheduleConceptBlips(audioCtx: AudioContext, dest: MediaStreamAudioDest
   }
 }
 
-function drawConceptPanel(
+
+function drawHashMapBoard(
+  ctx: CanvasRenderingContext2D,
+  scene: LessonScene,
+  elapsed: number,
+  duration: number,
+  topic: string,
+  lesson?: Lesson,
+) {
+  const visual = (scene.visual_diagram && scene.visual_diagram.kind === "hashmap"
+    ? scene.visual_diagram
+    : {
+        kind: "hashmap" as const,
+        capacity: 8,
+        init_code: "Map<String,Integer> map = new HashMap<>();",
+        setup_lines: [] as string[],
+        puts: [
+          { code: 'map.put("Mia",95)', key: "Mia", value: "95", hash_bits: "1010", bucket: 2, color: "orange" },
+          { code: 'map.put("Leo",88)', key: "Leo", value: "88", hash_bits: "0101", bucket: 5, color: "blue" },
+          { code: 'map.put("Zoe",92)', key: "Zoe", value: "92", hash_bits: "1010", bucket: 2, color: "green" },
+        ],
+      });
+  const puts = visual.puts || [];
+  const capacity = Math.max(4, Math.min(32, visual.capacity ?? 8));
+  const titles = puts.map((p) => p.code || p.key);
+  const anim = infoBulletAt(titles, elapsed, duration);
+  const active = Math.max(0, Math.min(anim.active, Math.max(0, puts.length - 1)));
+  const beat = anim.beats[active];
+  const progress = beat ? Math.max(0, Math.min(1, (elapsed - beat.start) / Math.max(0.05, beat.end - beat.start))) : 1;
+
+  const footer = 48;
+  const headerBottom = 360;
+  const available = HEIGHT - footer - headerBottom;
+  const panelH = Math.min(available, 560);
+  const panelTop = headerBottom + Math.max(0, (available - panelH) / 2);
+  const x = 28;
+  const w = WIDTH - 108;
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(103,232,249,0.95)";
+  ctx.font = "700 18px ui-sans-serif, system-ui";
+  ctx.fillText("EXPLAINER", WIDTH / 2, 74);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "800 30px ui-sans-serif, system-ui";
+  wrapLines(ctx, topic, WIDTH - 120, 2).forEach((line, index) => {
+    ctx.fillText(line, WIDTH / 2, 110 + index * 34);
+  });
+  ctx.textAlign = "left";
+
+  roundRect(ctx, x, panelTop, w, panelH, 22);
+  ctx.fillStyle = "rgba(11,18,32,0.96)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(34,211,238,0.28)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  let y = panelTop + 16;
+  // init code
+  roundRect(ctx, x + 14, y, w - 28, 28, 10);
+  ctx.fillStyle = "rgba(16,185,129,0.18)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(52,211,153,0.4)";
+  ctx.stroke();
+  ctx.fillStyle = "#d1fae5";
+  ctx.font = "600 13px ui-monospace, monospace";
+  ctx.fillText(String(visual.init_code || "").slice(0, 42), x + 24, y + 19);
+  y += 40;
+
+  // put chips
+  const colors: Record<string, string> = {
+    orange: "#f97316",
+    blue: "#0ea5e9",
+    green: "#10b981",
+    amber: "#fbbf24",
+    cyan: "#22d3ee",
+  };
+  let chipX = x + 14;
+  puts.forEach((put, index) => {
+    const label = String(put.code || put.key).slice(0, 22);
+    ctx.font = "700 11px ui-monospace, monospace";
+    const tw = ctx.measureText(label).width + 18;
+    const activeChip = index === active;
+    const past = index < active;
+    roundRect(ctx, chipX, y, tw, 22, 11);
+    ctx.fillStyle = activeChip || past ? colors[(put.color || "orange").toLowerCase()] || "#f97316" : "rgba(255,255,255,0.08)";
+    ctx.globalAlpha = activeChip ? 1 : past ? 0.7 : 0.45;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = activeChip || past ? "#09090b" : "#a1a1aa";
+    ctx.fillText(label, chipX + 9, y + 15);
+    chipX += tw + 8;
+  });
+  y += 34;
+
+  // formula
+  roundRect(ctx, x + 14, y, w - 28, 44, 12);
+  ctx.fillStyle = "rgba(0,0,0,0.4)";
+  ctx.fill();
+  ctx.fillStyle = "#a1a1aa";
+  ctx.font = "700 10px ui-sans-serif, system-ui";
+  ctx.fillText("put(K,V)  →  hash(k)  →  index = hash & (n-1)", x + 24, y + 16);
+  const bucket = puts[active]?.bucket ?? 0;
+  const collision = puts.slice(0, active).some((p) => p.bucket === bucket);
+  ctx.beginPath();
+  ctx.arc(x + 36, y + 32, 10, 0, Math.PI * 2);
+  ctx.fillStyle = collision && progress > 0.35 && progress < 0.72 ? "#a3e635" : "#22d3ee";
+  ctx.fill();
+  ctx.fillStyle = "#09090b";
+  ctx.font = "800 11px ui-sans-serif, system-ui";
+  ctx.textAlign = "center";
+  ctx.fillText(String(bucket), x + 36, y + 36);
+  ctx.textAlign = "left";
+  if (collision && progress > 0.35 && progress < 0.72) {
+    ctx.fillStyle = "#bef264";
+    ctx.font = "700 11px ui-sans-serif, system-ui";
+    ctx.fillText("equals? same bucket → chain via next", x + 56, y + 36);
+  }
+  y += 56;
+
+  // buckets + nodes
+  const bucketW = 52;
+  const bucketH = Math.min(22, (panelTop + panelH - y - 16) / capacity - 2);
+  const placedThrough = progress < 0.35 ? active - 1 : active;
+  const chains = new Map<number, typeof puts>();
+  for (let i = 0; i <= placedThrough; i++) {
+    const put = puts[i];
+    if (!put) continue;
+    const list = chains.get(put.bucket) || [];
+    list.push(put);
+    chains.set(put.bucket, list);
+  }
+
+  for (let b = 0; b < capacity; b++) {
+    const by = y + b * (bucketH + 2);
+    const filled = chains.has(b);
+    const isActive = puts[active]?.bucket === b && progress >= 0.2;
+    roundRect(ctx, x + 14, by, bucketW, bucketH, 6);
+    ctx.fillStyle = isActive ? "rgba(34,211,238,0.3)" : filled ? "rgba(56,189,248,0.18)" : "rgba(56,189,248,0.1)";
+    ctx.fill();
+    ctx.strokeStyle = isActive ? "rgba(103,232,249,0.7)" : "rgba(56,189,248,0.25)";
+    ctx.stroke();
+    ctx.fillStyle = "#e0f2fe";
+    ctx.font = "700 10px ui-monospace, monospace";
+    ctx.fillText(String(b), x + 22, by + bucketH * 0.68);
+  }
+
+  // draw chains to the right of buckets
+  const nodeX = x + 14 + bucketW + 12;
+  for (const [b, chain] of chains.entries()) {
+    let ny = y + b * (bucketH + 2);
+    chain.forEach((put, idx) => {
+      const nh = 52;
+      const isNew = puts[active] === put;
+      const slide = isNew ? Math.max(0, Math.min(1, (progress - 0.35) / 0.45)) : 1;
+      const ox = isNew ? (1 - slide) * 24 : 0;
+      roundRect(ctx, nodeX + ox, ny, w - (nodeX - x) - 20, nh, 10);
+      ctx.globalAlpha = 0.4 + slide * 0.6;
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fill();
+      ctx.strokeStyle = colors[(put.color || "orange").toLowerCase()] || "#f97316";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#fff";
+      ctx.font = "800 12px ui-monospace, monospace";
+      ctx.fillText(put.key, nodeX + ox + 10, ny + 16);
+      ctx.fillStyle = "#a1a1aa";
+      ctx.font = "600 10px ui-monospace, monospace";
+      ctx.fillText(`val ${put.value}  hash ${put.hash_bits || "—"}`, nodeX + ox + 10, ny + 32);
+      const nextLabel = idx < chain.length - 1 ? `next → ${chain[idx + 1].key}` : "next → null";
+      ctx.fillStyle = idx < chain.length - 1 ? "#bef264" : "#71717a";
+      ctx.fillText(nextLabel, nodeX + ox + 10, ny + 46);
+      if (idx < chain.length - 1) {
+        ctx.strokeStyle = "#a3e635";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(nodeX + 18, ny + nh + 2);
+        ctx.lineTo(nodeX + 18, ny + nh + 8);
+        ctx.stroke();
+      }
+      ny += nh + 10;
+    });
+  }
+}
+
+
+function isGcTopicExport(topic: string): boolean {
+  const t = (topic || "").toLowerCase();
+  return /garbage|garbege|\bgc\b|heap|mark\s*[- ]?\s*sweep|marking|sweep|compact|collector/.test(t);
+}
+
+function classifyGcPhaseExport(title: string, detail?: string, example?: string): string {
+  const blob = `${title || ""} ${detail || ""} ${example || ""}`.toLowerCase();
+  if (/compact|defrag|relocat/.test(blob)) return "compact";
+  if (/sweep|reclaim|collect|free|delete|remove/.test(blob)) return "sweep";
+  if (/mark|reachable|root|live/.test(blob)) return "mark";
+  if (/unref|unreachable|dead|orphan|garbage|unused/.test(blob)) return "unref";
+  if (/allocat|new\b|create|object|heap|store/.test(blob)) return "allocate";
+  return "other";
+}
+
+/** Canvas twin of MechanismBoard GcHeapPanel for MP4 export. */
+function drawGcHeapBoard(
   ctx: CanvasRenderingContext2D,
   scene: LessonScene,
   elapsed: number,
   duration: number,
   topic: string,
 ) {
-  const footer = 220;
-  const headerBottom = 188;
+  const footer = 48;
+  const headerBottom = 360;
   const available = HEIGHT - footer - headerBottom;
   const panelH = Math.min(available, 520);
   const panelTop = headerBottom + Math.max(0, (available - panelH) / 2);
   const x = 28;
   const w = WIDTH - 108;
 
-  const t = elapsed;
-  const orbs = [
-    { cx: 90, cy: panelTop + 40, r: 70, color: "rgba(139,92,246,0.28)", drift: 1 },
-    { cx: WIDTH - 130, cy: panelTop + 160, r: 58, color: "rgba(232,121,249,0.22)", drift: 1.4 },
-    { cx: 140, cy: panelTop + panelH - 40, r: 48, color: "rgba(34,211,238,0.18)", drift: 0.8 },
+  const steps = (scene.diagram_steps || [])
+    .map((s) => ({
+      title: String(s.title || "").trim(),
+      detail: String(s.detail || "").trim(),
+      example: String((s as { example?: string }).example || "").trim(),
+    }))
+    .filter((s) => s.title);
+  const titles = steps.map((s) => s.title);
+  const anim = infoBulletAt(titles.length ? titles : ["Heap"], elapsed, duration);
+  const ai = Math.max(0, Math.min(anim.active, Math.max(0, Math.max(1, titles.length) - 1)));
+  const step = steps[ai] || { title: topic, detail: "", example: "" };
+  const phase = classifyGcPhaseExport(step.title, step.detail, step.example);
+  const beat = anim.beats[ai];
+  const local = Math.max(
+    0,
+    Math.min(1, (elapsed - (beat?.start ?? 0)) / Math.max(0.01, (beat?.end ?? duration) - (beat?.start ?? 0))),
+  );
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(103,232,249,0.95)";
+  ctx.font = "700 16px ui-sans-serif, system-ui";
+  ctx.fillText("EXPLAINER", WIDTH / 2, 88);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 28px ui-sans-serif, system-ui";
+  wrapLines(ctx, topic, WIDTH - 120, 2).forEach((line, index) => {
+    ctx.fillText(line, WIDTH / 2, 126 + index * 34);
+  });
+  ctx.textAlign = "left";
+
+  roundRect(ctx, x, panelTop, w, panelH, 22);
+  ctx.fillStyle = "rgba(3,16,24,0.94)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(34,211,238,0.28)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  let chipX = x + 16;
+  const chipY = panelTop + 14;
+  steps.forEach((s, index) => {
+    const label = `${index + 1}. ${s.title.slice(0, 16)}`;
+    ctx.font = "700 10px ui-sans-serif, system-ui";
+    const tw = ctx.measureText(label).width + 16;
+    roundRect(ctx, chipX, chipY, tw, 20, 10);
+    if (index === ai) {
+      ctx.fillStyle = "rgba(251,191,36,0.35)";
+      ctx.strokeStyle = "rgba(251,191,36,0.7)";
+    } else if (index < ai) {
+      ctx.fillStyle = "rgba(34,211,238,0.22)";
+      ctx.strokeStyle = "rgba(34,211,238,0.4)";
+    } else {
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    }
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = index === ai ? "#fef3c7" : index < ai ? "#cffafe" : "#71717a";
+    ctx.fillText(label, chipX + 8, chipY + 14);
+    chipX += tw + 6;
+  });
+
+  const cardY = chipY + 32;
+  roundRect(ctx, x + 14, cardY, w - 28, 78, 14);
+  ctx.fillStyle = "rgba(8,51,68,0.85)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(103,232,249,0.45)";
+  ctx.stroke();
+  ctx.fillStyle = "#fbbf24";
+  ctx.font = "800 11px ui-sans-serif, system-ui";
+  ctx.fillText(`PHASE · ${phase.toUpperCase()}`, x + 28, cardY + 22);
+  ctx.fillStyle = "#fff";
+  ctx.font = "800 18px ui-sans-serif, system-ui";
+  ctx.fillText((step.title || topic).slice(0, 42), x + 28, cardY + 46);
+  if (step.example || step.detail) {
+    ctx.fillStyle = "rgba(165,243,252,0.9)";
+    ctx.font = "500 13px ui-sans-serif, system-ui";
+    ctx.fillText(String(step.example || step.detail).slice(0, 56), x + 28, cardY + 66);
+  }
+
+  const objs = [
+    { id: "A", live: true, color: "#f97316" },
+    { id: "B", live: true, color: "#22d3ee" },
+    { id: "C", live: true, color: "#a78bfa" },
+    { id: "D", live: false, color: "#34d399" },
+    { id: "E", live: false, color: "#fbbf24" },
   ];
+  const heapY = cardY + 98;
+  roundRect(ctx, x + 14, heapY, w - 28, panelTop + panelH - heapY - 16, 14);
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.fill();
+  ctx.fillStyle = "rgba(253,230,138,0.85)";
+  ctx.font = "800 11px ui-sans-serif, system-ui";
+  ctx.fillText("HEAP", x + 28, heapY + 22);
+
+  const countReveal = phase === "allocate" ? 2 + Math.floor(local * 3.2) : 5;
+  objs.forEach((obj, index) => {
+    if (index >= countReveal) return;
+    let present = true;
+    let dim = false;
+    let marked = false;
+    if (phase === "unref") {
+      dim = !obj.live && local > (obj.id === "D" ? 0.25 : 0.55);
+    } else if (phase === "mark") {
+      dim = !obj.live;
+      marked = obj.live && local > (obj.id === "A" ? 0.15 : obj.id === "B" ? 0.35 : 0.55);
+    } else if (phase === "sweep") {
+      if (!obj.live && local > 0.35) present = false;
+      marked = obj.live;
+    } else if (phase === "compact") {
+      if (!obj.live) present = false;
+      marked = obj.live;
+    } else if (phase === "other") {
+      marked = obj.live;
+      dim = !obj.live;
+    }
+    if (!present) return;
+    const ox = x + 28 + (index % 5) * 78 + (phase === "compact" && obj.live ? -index * 6 : 0);
+    const oy = heapY + 40;
+    roundRect(ctx, ox, oy, 64, 64, 12);
+    ctx.globalAlpha = dim ? 0.4 : 1;
+    ctx.fillStyle = marked ? "rgba(163,230,53,0.28)" : "rgba(255,255,255,0.06)";
+    ctx.fill();
+    ctx.strokeStyle = marked ? "#a3e635" : obj.color;
+    ctx.lineWidth = marked ? 2.5 : 1.5;
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.font = "800 18px ui-monospace, monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(obj.id, ox + 32, oy + 30);
+    ctx.font = "700 10px ui-sans-serif, system-ui";
+    ctx.fillStyle = marked ? "#bef264" : dim ? "#a1a1aa" : "#e4e4e7";
+    ctx.fillText(marked ? "MARKED" : obj.live ? "live" : "dead", ox + 32, oy + 48);
+    ctx.textAlign = "left";
+    ctx.globalAlpha = 1;
+  });
+
+  const captions: Record<string, string> = {
+    allocate: "new → objects land in heap",
+    unref: "refs cleared → unreachable",
+    mark: "GC marks reachable graph",
+    sweep: "sweep frees unmarked",
+    compact: "compact reduces free space",
+    other: "mechanism in motion",
+  };
+  ctx.fillStyle = "#a1a1aa";
+  ctx.font = "600 12px ui-sans-serif, system-ui";
+  ctx.fillText(captions[phase] || captions.other, x + 28, panelTop + panelH - 22);
+}
+
+function drawConceptPanel(
+  ctx: CanvasRenderingContext2D,
+  scene: LessonScene,
+  elapsed: number,
+  duration: number,
+  topic: string,
+  lesson?: Lesson,
+) {
+  const explainerMode =
+    lesson?.reel_mode === "explainer" || Boolean(scene.diagram_steps && scene.diagram_steps.length);
+  const wantsHashMap =
+    (scene.visual_diagram && scene.visual_diagram.kind === "hashmap") ||
+    (explainerMode && /hash\s*map|hashtable|hash\s*table/i.test(`${lesson?.topic || ""} ${topic || ""}`));
+  if (wantsHashMap) {
+    drawHashMapBoard(ctx, scene, elapsed, duration, topic, lesson);
+    return;
+  }
+  const topicBlob = `${lesson?.topic || ""} ${topic || ""}`;
+  if (
+    (lesson?.reel_mode === "explainer" || Boolean(scene.diagram_steps?.length)) &&
+    isGcTopicExport(topicBlob)
+  ) {
+    drawGcHeapBoard(ctx, scene, elapsed, duration, topic);
+    return;
+  }
+  const footer = 48;
+  const headerBottom = 360;
+  const available = HEIGHT - footer - headerBottom;
+  const panelH = Math.min(available, 520);
+  const panelTop = headerBottom + Math.max(0, (available - panelH) / 2);
+  const x = 28;
+  const w = WIDTH - 108;
+  const explainer =
+    lesson?.reel_mode === "explainer" || Boolean(scene.diagram_steps && scene.diagram_steps.length);
+
+  const t = elapsed;
+  const orbs = explainer
+    ? [
+        { cx: 90, cy: panelTop + 40, r: 70, color: "rgba(34,211,238,0.28)", drift: 1 },
+        { cx: WIDTH - 130, cy: panelTop + 160, r: 58, color: "rgba(251,191,36,0.22)", drift: 1.4 },
+        { cx: 140, cy: panelTop + panelH - 40, r: 48, color: "rgba(45,212,191,0.18)", drift: 0.8 },
+      ]
+    : [
+        { cx: 90, cy: panelTop + 40, r: 70, color: "rgba(139,92,246,0.28)", drift: 1 },
+        { cx: WIDTH - 130, cy: panelTop + 160, r: 58, color: "rgba(232,121,249,0.22)", drift: 1.4 },
+        { cx: 140, cy: panelTop + panelH - 40, r: 48, color: "rgba(34,211,238,0.18)", drift: 0.8 },
+      ];
   for (const orb of orbs) {
     const ox = Math.sin(t * orb.drift) * 10;
     const oy = Math.cos(t * orb.drift * 0.9) * 12;
@@ -497,9 +894,10 @@ function drawConceptPanel(
   }
 
   ctx.textAlign = "center";
-  ctx.fillStyle = "rgba(196,181,253,0.95)";
+  ctx.fillStyle = explainer ? "rgba(103,232,249,0.95)" : "rgba(196,181,253,0.95)";
   ctx.font = "700 16px ui-sans-serif, system-ui";
-  ctx.fillText("EXPLAIN", WIDTH / 2, 88);
+  const motionLabel = scene.type === "intro" ? "HOOK" : scene.type === "summary" ? "TAKEAWAY" : explainer ? "EXPLAINER" : "EXPLAIN";
+  ctx.fillText(motionLabel, WIDTH / 2, 88);
   ctx.fillStyle = "#ffffff";
   ctx.font = "700 28px ui-sans-serif, system-ui";
   wrapLines(ctx, topic, WIDTH - 120, 2).forEach((line, index) => {
@@ -508,13 +906,48 @@ function drawConceptPanel(
   ctx.textAlign = "left";
 
   roundRect(ctx, x, panelTop, w, panelH, 22);
-  ctx.fillStyle = "rgba(18,7,31,0.92)";
+  ctx.fillStyle = explainer ? "rgba(3,16,24,0.94)" : "rgba(18,7,31,0.92)";
   ctx.fill();
-  ctx.strokeStyle = "rgba(196,181,253,0.22)";
+  ctx.strokeStyle = explainer ? "rgba(34,211,238,0.28)" : "rgba(196,181,253,0.22)";
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
-  const bullets = (scene.bullets || []).map((b) => String(b || "").trim()).filter(Boolean);
+  // Soft grid for explainer motion-graphic feel
+  if (explainer) {
+    ctx.save();
+    ctx.beginPath();
+    roundRect(ctx, x, panelTop, w, panelH, 22);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(34,211,238,0.06)";
+    ctx.lineWidth = 1;
+    for (let gx = x + 8; gx < x + w; gx += 28) {
+      ctx.beginPath();
+      ctx.moveTo(gx, panelTop);
+      ctx.lineTo(gx, panelTop + panelH);
+      ctx.stroke();
+    }
+    for (let gy = panelTop + 8; gy < panelTop + panelH; gy += 28) {
+      ctx.beginPath();
+      ctx.moveTo(x, gy);
+      ctx.lineTo(x + w, gy);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  const steps = lesson
+    ? synthesizeBoardSteps(scene, lesson)
+    : (scene.diagram_steps || [])
+        .map((s) => ({
+          title: String(s.title || "").trim(),
+          detail: String(s.detail || "").trim(),
+          example: String((s as { example?: string }).example || "").trim(),
+        }))
+        .filter((s) => s.title);
+  const bullets = steps.length
+    ? steps.map((s) => s.title)
+    : (scene.bullets || []).map((b) => String(b || "").trim()).filter(Boolean);
+  const details = steps.length ? steps.map((s) => s.detail) : bullets.map(() => "");
   const anim = infoBulletAt(bullets, elapsed, duration);
   const pad = 22;
   let y = panelTop + pad + 8;
@@ -527,6 +960,144 @@ function drawConceptPanel(
     return;
   }
 
+  if (explainer) {
+    // Focus-stage export: mini pipeline dots + ONE big active card (not stacked list)
+    const count = bullets.length;
+    const ai = Math.max(0, Math.min(anim.active, Math.max(0, count - 1)));
+    const examples = steps.length ? steps.map((s) => s.example || "") : bullets.map(() => "");
+    const padX = pad;
+    const miniY = y + 6;
+    const miniR = 9;
+    const trackLeft = x + padX + 18;
+    const trackRight = x + w - padX - 18;
+    const trackW = Math.max(40, trackRight - trackLeft);
+
+    // Track
+    ctx.save();
+    ctx.strokeStyle = "rgba(34,211,238,0.16)";
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(trackLeft, miniY);
+    ctx.lineTo(trackRight, miniY);
+    ctx.stroke();
+    const drawFrac = count <= 1 ? 1 : ai / Math.max(1, count - 1);
+    ctx.strokeStyle = "rgba(34,211,238,0.65)";
+    ctx.shadowColor = "rgba(34,211,238,0.4)";
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(trackLeft, miniY);
+    ctx.lineTo(trackLeft + trackW * drawFrac, miniY);
+    ctx.stroke();
+    ctx.restore();
+
+    for (let index = 0; index < count; index++) {
+      const visible = index < anim.visibleCount;
+      const active = index === ai && visible;
+      const past = visible && index < ai;
+      const cx = count <= 1 ? (trackLeft + trackRight) / 2 : trackLeft + (trackW * index) / Math.max(1, count - 1);
+      ctx.beginPath();
+      ctx.arc(cx, miniY, miniR, 0, Math.PI * 2);
+      if (active) {
+        ctx.fillStyle = "#fbbf24";
+        ctx.shadowColor = "rgba(251,191,36,0.55)";
+        ctx.shadowBlur = 12;
+      } else if (past) {
+        ctx.fillStyle = "rgba(34,211,238,0.85)";
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.fillStyle = "rgba(255,255,255,0.12)";
+        ctx.shadowBlur = 0;
+      }
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = active ? "#09090b" : past ? "#083344" : "rgba(207,250,254,0.35)";
+      ctx.font = "800 10px ui-sans-serif, system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText(String(index + 1), cx, miniY + 3);
+    }
+
+    // Traveling token
+    if (anim.visibleCount > 0) {
+      const tx = count <= 1 ? (trackLeft + trackRight) / 2 : trackLeft + trackW * drawFrac;
+      const pulse = 0.85 + 0.15 * Math.sin(elapsed * 6);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(tx, miniY, 6 * pulse, 0, Math.PI * 2);
+      const tg = ctx.createRadialGradient(tx - 2, miniY - 2, 1, tx, miniY, 8);
+      tg.addColorStop(0, "#fff7ed");
+      tg.addColorStop(0.4, "#fbbf24");
+      tg.addColorStop(1, "#22d3ee");
+      ctx.fillStyle = tg;
+      ctx.shadowColor = "rgba(34,211,238,0.9)";
+      ctx.shadowBlur = 14;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ONE big active card
+    const cardTop = miniY + 28;
+    const cardH = Math.max(160, panelTop + panelH - pad - cardTop);
+    const cardX = x + padX;
+    const cardW = w - padX * 2;
+    const local = Math.max(0, Math.min(1, (elapsed - (anim.beats[ai]?.start ?? 0)) / 0.35));
+    const ease = 1 - Math.pow(1 - local, 3);
+
+    ctx.save();
+    ctx.globalAlpha = 0.45 + 0.55 * ease;
+    ctx.translate(0, (1 - ease) * 16);
+    roundRect(ctx, cardX, cardTop, cardW, cardH, 18);
+    ctx.fillStyle = "rgba(8,51,68,0.88)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(103,232,249,0.7)";
+    ctx.lineWidth = 1.8;
+    ctx.shadowColor = "rgba(34,211,238,0.4)";
+    ctx.shadowBlur = 18;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(253,230,138,0.95)";
+    ctx.font = "800 12px ui-sans-serif, system-ui";
+    ctx.fillText(`STEP ${ai + 1} OF ${count}`, cardX + 18, cardTop + 28);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "800 22px ui-sans-serif, system-ui";
+    wrapLines(ctx, bullets[ai] || "", cardW - 36, 2).forEach((line, li) => {
+      ctx.fillText(line, cardX + 18, cardTop + 58 + li * 26);
+    });
+
+    if (details[ai]) {
+      ctx.fillStyle = "rgba(165,243,252,0.92)";
+      ctx.font = "500 15px ui-sans-serif, system-ui";
+      wrapLines(ctx, details[ai], cardW - 36, 3).forEach((line, li) => {
+        ctx.fillText(line, cardX + 18, cardTop + 112 + li * 20);
+      });
+    }
+
+    const ex = examples[ai] || "";
+    if (ex) {
+      const boxY = cardTop + cardH - 78;
+      roundRect(ctx, cardX + 14, boxY, cardW - 28, 58, 12);
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(34,211,238,0.28)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = "rgba(103,232,249,0.75)";
+      ctx.font = "700 11px ui-sans-serif, system-ui";
+      ctx.fillText("EXAMPLE", cardX + 26, boxY + 18);
+      ctx.fillStyle = "rgba(254,243,199,0.95)";
+      ctx.font = "600 14px ui-monospace, SFMono-Regular, Menlo, monospace";
+      wrapLines(ctx, ex, cardW - 56, 2).forEach((line, li) => {
+        ctx.fillText(line, cardX + 26, boxY + 38 + li * 16);
+      });
+    }
+    ctx.restore();
+    return;
+  }
+
+  // Info mode — violet bullets (unchanged look)
   const slot = Math.min(86, Math.max(58, (panelH - pad * 2) / Math.max(1, bullets.length)));
   bullets.forEach((item, index) => {
     if (index >= anim.visibleCount) return;
@@ -554,9 +1125,16 @@ function drawConceptPanel(
     ctx.textAlign = "left";
     ctx.fillStyle = "#f4f4f5";
     ctx.font = "600 17px ui-sans-serif, system-ui";
-    wrapLines(ctx, item, w - pad * 2 - 56, 2).forEach((line, li) => {
-      ctx.fillText(line, x + pad + 44, by + 28 + li * 22);
+    wrapLines(ctx, item, w - pad * 2 - 56, details[index] ? 1 : 2).forEach((line, li) => {
+      ctx.fillText(line, x + pad + 44, by + 24 + li * 20);
     });
+    if (details[index]) {
+      ctx.fillStyle = "rgba(196,181,253,0.75)";
+      ctx.font = "500 13px ui-sans-serif, system-ui";
+      wrapLines(ctx, details[index], w - pad * 2 - 56, 1).forEach((line, li) => {
+        ctx.fillText(line, x + pad + 44, by + 46 + li * 16);
+      });
+    }
     ctx.restore();
   });
 }
@@ -573,7 +1151,8 @@ function drawFrame(
   sceneCount: number,
   watermark: HTMLCanvasElement | null,
 ) {
-  const poster = isPosterScene(scene.type);
+  const explainMotion = isExplainMotionLesson(lesson);
+  const poster = isPosterScene(scene.type) && !explainMotion;
   if (poster) {
     if (!drawCoverImage(ctx, thumb)) drawStudioBackground(ctx);
   } else {
@@ -634,26 +1213,31 @@ function drawFrame(
       });
     }
     ctx.textAlign = "left";
-  } else if (scene.type === "concept" || lesson.requires_code === false) {
-    drawConceptPanel(ctx, scene, elapsed, duration, topic);
+  } else if (
+    scene.type === "concept" ||
+    explainMotion ||
+    lesson.requires_code === false ||
+    lesson.reel_mode === "explainer"
+  ) {
+    drawConceptPanel(ctx, scene, elapsed, duration, topic, lesson);
   } else {
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(165,243,252,0.9)";
-    ctx.font = "700 16px ui-sans-serif, system-ui";
-    ctx.fillText(lesson.language.toUpperCase(), WIDTH / 2, 88);
+    ctx.font = "700 18px ui-sans-serif, system-ui";
+    ctx.fillText(lesson.language.toUpperCase(), WIDTH / 2, 84);
     ctx.fillStyle = "#ffffff";
-    ctx.font = "700 28px ui-sans-serif, system-ui";
+    ctx.font = "800 32px ui-sans-serif, system-ui";
     wrapLines(ctx, topic, WIDTH - 120, 2).forEach((line, index) => {
-      ctx.fillText(line, WIDTH / 2, 126 + index * 34);
+      ctx.fillText(line, WIDTH / 2, 122 + index * 36);
     });
     ctx.textAlign = "left";
 
-    const footer = 220;
-    const headerBottom = 188;
+    const footer = 48;
+    const headerBottom = 360; // topic + larger Byte + karaoke caption
     const available = HEIGHT - footer - headerBottom;
     const lineCount = Math.max(1, (code || " ").replace(/\n$/, "").split("\n").length);
-    const consoleH = debugging ? Math.min(158, 52 + Math.max(1, outputLines.length) * 20) : 0;
-    const ideH = Math.min(available, Math.max(220, 38 + lineCount * 22 + 24 + consoleH));
+    const consoleH = debugging ? Math.min(170, 56 + Math.max(1, outputLines.length) * 22) : 0;
+    const ideH = Math.min(available, Math.max(240, 42 + lineCount * 24 + 28 + consoleH));
     const ideTop = headerBottom + Math.max(0, (available - ideH) / 2);
     const filename = scene.filename || "Main.java";
     drawIdeWindow(
@@ -681,22 +1265,64 @@ function drawFrame(
   }
 
   const viseme = visemeAt(scene.narration || "", elapsed, true, duration);
-  drawByte(ctx, 16, HEIGHT - 236, 0.82, viseme);
-  ctx.fillStyle = "rgba(165,243,252,0.9)";
-  ctx.font = "700 11px ui-sans-serif, system-ui";
-  ctx.fillText("BYTE", 58, HEIGHT - 72);
+  // Larger Byte + karaoke caption sit higher to fill empty lower/mid space.
+  const byteY = poster ? HEIGHT - 280 : 168;
+  drawByte(ctx, 18, byteY, poster ? 0.95 : 1.15, viseme);
+  ctx.fillStyle = "rgba(165,243,252,0.95)";
+  ctx.font = "700 13px ui-sans-serif, system-ui";
+  ctx.fillText("PAVI", 64, byteY + (poster ? 198 : 214));
 
-  ctx.fillStyle = "rgba(0,0,0,0.62)";
-  roundRect(ctx, 148, HEIGHT - 148, WIDTH - 230, 92, 18);
+  const boxX = 168;
+  const boxY = byteY + 18;
+  const boxW = WIDTH - 250;
+  const boxH = 118;
+  ctx.fillStyle = "rgba(0,0,0,0.72)";
+  roundRect(ctx, boxX, boxY, boxW, boxH, 20);
   ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.1)";
+  ctx.strokeStyle = "rgba(255,255,255,0.14)";
   ctx.lineWidth = 1;
   ctx.stroke();
-  ctx.fillStyle = "#fff";
-  ctx.font = "600 18px ui-sans-serif, system-ui";
-  wrapLines(ctx, caption, WIDTH - 268, 3).forEach((line, index) => {
-    ctx.fillText(line, 164, HEIGHT - 116 + index * 22);
+
+  const karaokeWords = buildKaraokeWords(caption, duration, {
+    cueStart: cue?.start ?? 0,
+    cueEnd: cue?.end ?? duration,
+    segments: scene.segments || [],
   });
+  const active = activeWordIndex(karaokeWords, elapsed);
+  const windowWords = karaokeWindow(karaokeWords, Math.max(0, active), 12);
+  ctx.font = "700 22px ui-sans-serif, system-ui";
+  let kx = boxX + 16;
+  let ky = boxY + 40;
+  const maxX = boxX + boxW - 16;
+  const lineH = 28;
+  for (const word of windowWords) {
+    const metrics = ctx.measureText(word.text + " ");
+    if (kx + metrics.width > maxX) {
+      kx = boxX + 16;
+      ky += lineH;
+      if (ky > boxY + boxH - 12) break;
+    }
+    const isActive = word.index === active;
+    const isPast = word.index < active;
+    ctx.fillStyle = isActive ? "#fde68a" : isPast ? "#ffffff" : "#a1a1aa";
+    if (isActive) {
+      ctx.save();
+      ctx.shadowColor = "rgba(251,191,36,0.55)";
+      ctx.shadowBlur = 16;
+      ctx.fillText(word.text, kx, ky);
+      ctx.restore();
+    } else {
+      ctx.fillText(word.text, kx, ky);
+    }
+    kx += metrics.width;
+  }
+  if (!windowWords.length) {
+    ctx.fillStyle = "#fff";
+    ctx.font = "600 20px ui-sans-serif, system-ui";
+    wrapLines(ctx, caption, boxW - 28, 3).forEach((line, index) => {
+      ctx.fillText(line, boxX + 16, boxY + 38 + index * 26);
+    });
+  }
   drawWatermark(ctx, watermark);
 }
 

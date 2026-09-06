@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import wave
 import logging
 import threading
 from typing import Any
@@ -61,6 +63,7 @@ def queue_lesson(
     spoken_language: str = "en",
     reel_seconds: int = 30,
     requires_code: bool | None = None,
+    reel_mode: str | None = None,
 ) -> tuple[str, str]:
     uid = ensure_user(db, user_id)
     lesson_id = new_id("les_")
@@ -81,6 +84,7 @@ def queue_lesson(
             "spoken_language": spoken,
             "reel_seconds": seconds,
             **({"requires_code": requires_code} if requires_code is not None else {}),
+            **({"reel_mode": reel_mode} if reel_mode else {}),
         },
     )
     db.add(row)
@@ -98,6 +102,7 @@ def queue_lesson(
             "user_id": uid,
             "reel_seconds": seconds,
             **({"requires_code": requires_code} if requires_code is not None else {}),
+            **({"reel_mode": reel_mode} if reel_mode else {}),
         },
     )
     enqueue(job.id, "lesson_generation")
@@ -192,16 +197,21 @@ def generate_lesson_assets(
     remaining = list(lesson.scenes)
     voice = tts_voice_for(lesson.spoken_language)
     for index, scene in enumerate(lesson.scenes):
-        narration = _spoken_scene_text(lesson, scene)
+        # Sanitize persisted narration if an older TTS pass appended bullet lists.
+        bullets = [str(b).strip() for b in (getattr(scene, "bullets", None) or []) if str(b).strip()]
+        cleaned_narration = _strip_appended_bullet_list(scene.narration or "", bullets)
         scene_patch: dict[str, Any] = {}
-        if narration != scene.narration:
-            scene_patch["narration"] = narration
+        if cleaned_narration != (scene.narration or "").strip():
+            scene_patch["narration"] = cleaned_narration
+            scene = scene.model_copy(update={"narration": cleaned_narration})
             scene_patch["audio_url"] = None
-        audio_url = scene.audio_url if not scene_patch else None
-        if narration.strip():
+        spoken = _spoken_scene_text(lesson, scene)
+        # Speak `spoken` but do NOT write TTS enrichment back into narration.
+        audio_url = None if "audio_url" in scene_patch else scene.audio_url
+        if spoken.strip():
             try:
                 audio_url, used = synthesize_narration(
-                    db, narration, provider_name="google", voice=voice
+                    db, spoken, provider_name="google", voice=voice
                 )
                 if used != "google":
                     warnings.append("Google Cloud narration was unavailable for a scene.")
@@ -211,6 +221,7 @@ def generate_lesson_assets(
                 warnings.append("Google Cloud narration is unavailable for a scene.")
         scene_patch["audio_url"] = audio_url
         updated = scene.model_copy(update=scene_patch)
+        updated = _align_scene_to_audio(updated, audio_url)
         updated_scenes.append(updated)
         remaining = remaining[1:]
         if row is not None and index == 0:
@@ -218,19 +229,90 @@ def generate_lesson_assets(
     return lesson.model_copy(update={"scenes": updated_scenes})
 
 
+def _strip_appended_bullet_list(narration: str, bullets: list[str]) -> str:
+    """Remove trailing on-screen bullet dumps that TTS enrichment used to persist."""
+    text = (narration or "").strip()
+    if not text:
+        return text
+    # Cut at first English numbered list dump like "1. Heap Allocation"
+    m = re.search(r"([।.])\s*1\.\s+[A-Za-z]", text)
+    if m and m.start() > 40:
+        return text[: m.start() + 1].strip()
+    m = re.search(r"\s1\.\s+[A-Za-z].*2\.\s+[A-Za-z]", text)
+    if m and m.start() > 40:
+        return text[: m.start()].rstrip(" .।") + ("।" if "।" in text[: m.start()] else ".")
+    if bullets:
+        first = bullets[0]
+        idx = text.find(first)
+        if idx > 40 and re.search(r"\d+\.\s*" + re.escape(first), text[idx - 5 : idx + len(first) + 5]):
+            prev = max(text.rfind("।", 0, idx), text.rfind(".", 0, idx))
+            if prev > 20:
+                return text[: prev + 1].strip()
+    return text
+
+
 def _spoken_scene_text(lesson: Lesson, scene: Any) -> str:
-    narration = teachable_narration(scene.narration, lesson.spoken_language, scene.narration)
+    bullets = [str(b).strip() for b in (getattr(scene, "bullets", None) or []) if str(b).strip()]
+    cleaned = _strip_appended_bullet_list(scene.narration or "", bullets)
+    narration = teachable_narration(cleaned, lesson.spoken_language, cleaned)
     if getattr(scene, "type", "") == "intro":
         return hook_narration(narration, lesson.spoken_language, lesson.topic, lesson.lesson_id)
-    if getattr(scene, "type", "") == "concept":
-        bullets = [str(b).strip() for b in (getattr(scene, "bullets", None) or []) if str(b).strip()]
-        if bullets:
-            joined = ". ".join(bullets)
-            if narration and narration.strip() and narration.strip() not in joined:
-                return f"{narration.strip()}. {joined}"
-            return joined
+    # Concept/explainer: on-screen bullets/diagram titles stay visual-only.
+    # Never append them into TTS — that used to persist and multiply on each audio refresh.
     return narration
 
+
+
+def _audio_duration_seconds(audio_url: str | None) -> float | None:
+    """Read WAV length for a stored /audio/... url."""
+    if not audio_url:
+        return None
+    from pathlib import Path as _Path
+    name = _Path(str(audio_url)).name
+    for base in (
+        _Path(settings.storage_path) / "audio",
+        _Path(__file__).resolve().parents[2] / "storage" / "audio",
+        _Path(__file__).resolve().parents[3] / "storage" / "audio",
+    ):
+        if base is None:
+            continue
+        path = base / name
+        if not path.is_file():
+            continue
+        try:
+            with wave.open(str(path), "rb") as handle:
+                rate = float(handle.getframerate() or 1)
+                frames = float(handle.getnframes() or 0)
+                if rate > 0 and frames > 0:
+                    return frames / rate
+        except Exception:
+            return None
+    return None
+
+
+def _align_scene_to_audio(scene: Any, audio_url: str | None) -> Any:
+    """Snap scene.duration + segments to the real TTS WAV so board/cues match speech."""
+    dur = _audio_duration_seconds(audio_url)
+    if not dur or dur < 0.4:
+        return scene
+    dur = round(float(dur), 2)
+    segments = list(getattr(scene, "segments", None) or [])
+    if not segments:
+        return scene.model_copy(update={"duration": dur, "audio_url": audio_url or scene.audio_url})
+    last = max(float(getattr(s, "end", 0) or 0) for s in segments) or 0.0
+    if last <= 0.05:
+        return scene.model_copy(update={"duration": dur, "audio_url": audio_url or scene.audio_url})
+    scale = dur / last
+    updated = []
+    for seg in segments:
+        start = round(float(seg.start or 0) * scale, 2)
+        end = round(float(seg.end or 0) * scale, 2)
+        updated.append(seg.model_copy(update={"start": start, "end": max(start + 0.05, end)}))
+    if updated:
+        updated[-1] = updated[-1].model_copy(update={"end": dur})
+    return scene.model_copy(
+        update={"duration": dur, "segments": updated, "audio_url": audio_url or scene.audio_url}
+    )
 
 def lesson_needs_google_audio(lesson: Lesson) -> bool:
     voice = tts_voice_for(lesson.spoken_language)
@@ -344,7 +426,13 @@ def refresh_reel_thumbnail(db: Session, lesson_id: str, *, force: bool = False) 
 
     _, program = extract_primary_code(lesson.model_dump(mode="json"))
     url = ensure_reel_thumbnail(
-        lesson.lesson_id, lesson.topic, lesson.topic, lesson.language, program
+        lesson.lesson_id,
+        lesson.topic,
+        lesson.topic,
+        lesson.language,
+        program,
+        reel_mode=getattr(lesson, "reel_mode", None),
+        spoken_language=getattr(lesson, "spoken_language", None),
     )
     updated = lesson.model_copy(update={"thumbnail_url": url, "thumbnail_custom": False})
     persist_lesson(db, row, updated, list(row.warnings or []))
@@ -446,6 +534,7 @@ def build_lesson(
     spoken_language: str = "en",
     reel_seconds: int = 30,
     requires_code: bool | None = None,
+    reel_mode: str | None = None,
 ) -> Lesson:
     row = db.get(LessonRow, lesson_id)
     if row is None:
@@ -456,6 +545,8 @@ def build_lesson(
 
     if requires_code is None and isinstance(row.lesson_json, dict) and "requires_code" in row.lesson_json:
         requires_code = bool(row.lesson_json.get("requires_code"))
+    if not reel_mode and isinstance(row.lesson_json, dict):
+        reel_mode = row.lesson_json.get("reel_mode")
     plan = plan_lesson(
         topic,
         language,
@@ -464,6 +555,7 @@ def build_lesson(
         spoken_language=spoken_language,
         reel_seconds=reel_seconds,
         requires_code=requires_code,
+        reel_mode=reel_mode,
     )
     lesson = generate_structured_lesson(plan, lesson_id)
     lesson = _stamp_language(lesson)
@@ -530,6 +622,8 @@ def build_lesson(
                         lesson.topic,
                         lesson.language,
                         extract_primary_code(lesson.model_dump(mode="json"))[1],
+                        reel_mode=getattr(lesson, "reel_mode", None),
+                        spoken_language=getattr(lesson, "spoken_language", None),
                     )
                 }
             )
@@ -601,6 +695,8 @@ def list_recent_lessons(db: Session, user_id: str) -> list[dict[str, Any]]:
                 "format": (row.lesson_json or {}).get("format") or "lesson",
                 "thumbnail_url": (row.lesson_json or {}).get("thumbnail_url"),
                 "reel_seconds": (row.lesson_json or {}).get("reel_seconds") or 30,
+                "reel_mode": (row.lesson_json or {}).get("reel_mode"),
+                "requires_code": (row.lesson_json or {}).get("requires_code"),
             }
         )
     return results
@@ -626,6 +722,42 @@ def delete_lesson(db: Session, lesson_id: str) -> None:
     db.query(LessonSceneRow).filter(LessonSceneRow.lesson_id == lesson_id).delete(synchronize_session=False)
     db.delete(row)
     db.commit()
+
+
+def delete_all_lessons(db: Session) -> dict[str, int]:
+    """Remove every lesson and related rows; clear generated audio files."""
+    from pathlib import Path as _Path
+
+    lesson_ids = [lid for (lid,) in db.query(LessonRow.id).all()]
+    count = len(lesson_ids)
+    if lesson_ids:
+        question_ids = [
+            qid
+            for (qid,) in db.query(QuizQuestion.id).filter(QuizQuestion.lesson_id.in_(lesson_ids)).all()
+        ]
+        if question_ids:
+            db.query(QuizAttempt).filter(QuizAttempt.question_id.in_(question_ids)).delete(synchronize_session=False)
+        db.query(QuizQuestion).filter(QuizQuestion.lesson_id.in_(lesson_ids)).delete(synchronize_session=False)
+        db.query(LessonProgress).filter(LessonProgress.lesson_id.in_(lesson_ids)).delete(synchronize_session=False)
+        db.query(CodeExample).filter(CodeExample.lesson_id.in_(lesson_ids)).delete(synchronize_session=False)
+        db.query(CodeExecution).filter(CodeExecution.lesson_id.in_(lesson_ids)).delete(synchronize_session=False)
+        db.query(LessonSceneRow).filter(LessonSceneRow.lesson_id.in_(lesson_ids)).delete(synchronize_session=False)
+        db.query(LessonRow).delete(synchronize_session=False)
+        db.commit()
+
+    audio_removed = 0
+    audio_dir = _Path(__file__).resolve().parents[2] / "storage" / "audio"
+    if audio_dir.is_dir():
+        for path in audio_dir.rglob("*"):
+            if path.is_file():
+                try:
+                    path.unlink()
+                    audio_removed += 1
+                except OSError:
+                    pass
+
+    return {"lessons": count, "audio_files": audio_removed}
+
 
 def update_reel_script(
     db: Session,

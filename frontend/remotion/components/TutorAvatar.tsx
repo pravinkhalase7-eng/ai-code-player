@@ -12,7 +12,7 @@ export function TutorAvatar({ speaking }: { speaking: boolean }) {
           boxShadow: "0 18px 40px rgba(251,191,36,0.35)",
         }}
       />
-      <div style={{ marginTop: 8, letterSpacing: 3, fontSize: 12, color: "#fde68a" }}>BYTE</div>
+      <div style={{ marginTop: 8, letterSpacing: 3, fontSize: 12, color: "#fde68a" }}>PAVI</div>
     </div>
   );
 }

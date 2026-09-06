@@ -24,7 +24,7 @@ export function ByteAvatar({
       >
         <img
           src="/byte-avatar.svg"
-          alt="Byte"
+          alt="Pavi"
           className={cn(px, "object-contain")}
         />
         {speaking ? (
@@ -32,7 +32,7 @@ export function ByteAvatar({
         ) : null}
       </div>
       {showName ? (
-        <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-amber-200/90">Byte</p>
+        <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-amber-200/90">Pavi</p>
       ) : null}
     </div>
   );

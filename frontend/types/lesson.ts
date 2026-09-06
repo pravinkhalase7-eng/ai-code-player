@@ -51,6 +51,31 @@ export type ExecutionStep = {
   stopped?: boolean;
 };
 
+export type HashMapPutStep = {
+  code: string;
+  key: string;
+  value: string;
+  hash_bits?: string;
+  bucket: number;
+  color?: string;
+};
+
+export type VisualSpec = {
+  kind?: string;
+  title?: string;
+  callouts?: string[];
+  particles?: boolean;
+};
+
+export type HashMapVisual = {
+  kind: "hashmap";
+  capacity?: number;
+  init_code?: string;
+  setup_lines?: string[];
+  puts?: HashMapPutStep[];
+  node_fields?: string[];
+};
+
 export type LessonScene = {
   id: string;
   type: SceneType;
@@ -59,6 +84,7 @@ export type LessonScene = {
   segments?: NarrationSegment[];
   expression?: TutorExpression;
   audio_url?: string | null;
+  visual?: VisualSpec | null;
   language?: string;
   filename?: string;
   code?: string;
@@ -76,6 +102,8 @@ export type LessonScene = {
   answer?: number | string | null;
   explanation?: string;
   bullets?: string[];
+  diagram_steps?: { title: string; detail?: string; example?: string }[];
+  visual_diagram?: HashMapVisual | null;
   takeaways?: string[];
   starter_code?: string | null;
   tests?: string[];
@@ -96,6 +124,7 @@ export type Lesson = {
   thumbnail_custom?: boolean;
   reel_seconds?: number;
   requires_code?: boolean;
+  reel_mode?: string | null;
 };
 
 export type LessonSummary = {
@@ -111,6 +140,8 @@ export type LessonSummary = {
   topic: string;
   thumbnail_url?: string | null;
   reel_seconds?: number;
+  reel_mode?: string | null;
+  requires_code?: boolean;
 };
 
 export type RunHelp = {

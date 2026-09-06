@@ -33,6 +33,7 @@ export function createLesson(
   spokenLanguage = "en",
   reelSeconds = 30,
   requiresCode?: boolean,
+  reelMode?: string,
 ) {
   return request<{ lesson_id: string; status: string; job_id: string }>(
     "/api/v1/tutor/lesson",
@@ -46,6 +47,7 @@ export function createLesson(
         spoken_language: spokenLanguage,
         reel_seconds: format === "reel" ? reelSeconds : 30,
         ...(typeof requiresCode === "boolean" ? { requires_code: requiresCode } : {}),
+        ...(reelMode ? { reel_mode: reelMode } : {}),
       }),
     },
   );
@@ -63,6 +65,12 @@ export function listLessons() {
 
 export function deleteLesson(lessonId: string) {
   return request<{ ok: boolean; lesson_id: string }>(`/api/v1/lesson/${lessonId}`, {
+    method: "DELETE",
+  });
+}
+
+export function deleteAllLessons() {
+  return request<{ ok: boolean; lessons: number; audio_files: number }>("/api/v1/lessons", {
     method: "DELETE",
   });
 }

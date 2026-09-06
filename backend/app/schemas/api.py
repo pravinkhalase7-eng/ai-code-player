@@ -25,6 +25,7 @@ class LessonCreateRequest(BaseModel):
     user_id: str | None = None
     reel_seconds: int = 30
     requires_code: bool | None = None
+    reel_mode: str | None = None
 
     @field_validator("language")
     @classmethod
@@ -40,6 +41,16 @@ class LessonCreateRequest(BaseModel):
     @classmethod
     def _reel_seconds(cls, value: int) -> int:
         return normalize_reel_seconds(value)
+
+    @field_validator("reel_mode")
+    @classmethod
+    def _reel_mode(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = str(value).strip().lower()
+        if cleaned not in {"code", "info", "explainer"}:
+            raise ValueError('reel_mode must be "code", "info", "explainer", or null')
+        return cleaned
 
 
 class LessonCreateResponse(BaseModel):
