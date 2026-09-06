@@ -59,7 +59,7 @@ CODE_LINES = {
 }
 
 _MONO = "Menlo, Consolas, Monaco, ui-monospace, monospace"
-THUMB_VERSION = "code-v5-complete"
+THUMB_VERSION = "code-v6-hero-line"
 
 
 def images_dir() -> Path:
@@ -223,9 +223,20 @@ def write_svg_poster(
         card_h = max(120, footer_top - code_top)
     code_svg = []
     cy = code_top + 58
+    # One hero teaching line in accent; every other line the same muted ink.
+    hero = 0
+    for index, row in enumerate(preview):
+        stripped = row.strip()
+        if not stripped or stripped in {"{", "}", "};"}:
+            continue
+        low = stripped.casefold()
+        if low.startswith(("import ", "package ", "from ", "public class", "public static void main")):
+            continue
+        hero = index
+        break
     if preview:
         for index, row in enumerate(preview):
-            fill = colors["accent"] if index in {0, 1} else "#d4d4d8"
+            fill = colors["accent"] if index == hero else "#d4d4d8"
             formatted = _format_code_row(row)
             code_svg.append(
                 f'<text x="108" y="{cy}" font-size="20" font-family="{_MONO}" fill="#52525b">'
