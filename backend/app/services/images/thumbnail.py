@@ -68,6 +68,18 @@ def images_dir() -> Path:
     return path
 
 
+
+def thumbnail_prompt(topic: str, language: str) -> str:
+    """Original Gemini reel-poster prompt (used when image_provider=gemini)."""
+    return (
+        f"Vertical 9:16 cinematic social-media thumbnail for a coding reel. "
+        f"Topic: {topic}. Language: {language}. "
+        f"Dark glossy background, neon amber and cyan light, huge readable title '{topic}', "
+        f"small badge 'BYTE', abstract code rain, no watermarks, no celebrity faces, "
+        f"high contrast, catchy, viral educational poster."
+    )
+
+
 def _wrap(text: str, width: int = 18, max_lines: int = 3) -> list[str]:
     words = (text or "").split()
     lines: list[str] = []
