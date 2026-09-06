@@ -21,8 +21,8 @@ pipeline {
     )
     string(
       name: 'PUBLIC_APP_URL',
-      defaultValue: 'http://187.127.138.86:3010',
-      description: 'Browser-facing tutor UI URL'
+      defaultValue: 'https://play.doxstation.com',
+      description: 'Browser-facing tutor UI URL (use https://play.doxstation.com after DNS + TLS)'
     )
     string(
       name: 'ENV_CREDENTIAL_ID',
