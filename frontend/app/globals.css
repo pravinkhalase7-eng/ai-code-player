@@ -432,15 +432,17 @@ body {
 /* Karaoke caption words (audio-synced) */
 .karaoke-word {
   transform: translateY(0) scale(1);
+  transform-origin: center bottom;
+  padding-inline: 0.12em;
 }
 .karaoke-word-active {
   color: #fde68a !important;
   text-shadow: 0 0 18px rgba(251, 191, 36, 0.55);
-  transform: translateY(-1px) scale(1.12);
+  transform: translateY(-1px) scale(1.07);
   font-weight: 800;
   animation: karaoke-pop 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 @keyframes karaoke-pop {
-  0% { transform: translateY(4px) scale(0.92); opacity: 0.7; }
-  100% { transform: translateY(-1px) scale(1.12); opacity: 1; }
+  0% { transform: translateY(4px) scale(0.94); opacity: 0.7; }
+  100% { transform: translateY(-1px) scale(1.07); opacity: 1; }
 }

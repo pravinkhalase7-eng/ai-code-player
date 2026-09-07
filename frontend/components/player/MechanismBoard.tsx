@@ -294,21 +294,22 @@ function GenericStageBoard({
   const p = clamp01(progress);
 
   return (
-    <div className="mechanism-board relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-cyan-200/25 bg-[#031018]/94 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+    <div className="mechanism-board relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-cyan-200/25 bg-[#031018]/94 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
       <div className="mechanism-board-grid pointer-events-none absolute inset-0" aria-hidden />
 
-      <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-3">
-        <div className="mechanism-mini-pipeline relative mx-auto w-full max-w-[22rem] shrink-0 px-2 pt-1">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-5">
+        <div className="mechanism-mini-pipeline relative mx-auto w-full max-w-[22rem] shrink-0 px-3 pt-2 pb-1">
+          {/* Track sits behind nodes; inset so caps don't poke past first/last circles */}
           <div
-            className="pointer-events-none absolute left-4 right-4 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-cyan-400/15"
+            className="pointer-events-none absolute left-5 right-5 top-1/2 z-0 h-[2px] -translate-y-1/2 rounded-full bg-cyan-400/20"
             aria-hidden
           />
           <div
-            className="pointer-events-none absolute left-4 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-gradient-to-r from-cyan-400/70 via-amber-300/80 to-cyan-300/50 transition-[width] duration-500 ease-out"
-            style={{ width: `calc((100% - 2rem) * ${tokenPct / 100})` }}
+            className="pointer-events-none absolute left-5 top-1/2 z-0 h-[2px] -translate-y-1/2 rounded-full bg-gradient-to-r from-cyan-400/80 via-amber-300/85 to-cyan-300/55 transition-[width] duration-500 ease-out"
+            style={{ width: `calc((100% - 2.5rem) * ${tokenPct / 100})` }}
             aria-hidden
           />
-          <ol className="relative z-10 flex items-center justify-between gap-1">
+          <ol className="relative z-10 flex items-center justify-between gap-2">
             {steps.map((s, index) => {
               const isActive = index === safeActive;
               const isPast = index < safeActive;
@@ -316,11 +317,12 @@ function GenericStageBoard({
                 <li
                   key={`mini-${index}-${s.title}`}
                   className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-extrabold transition-all duration-300",
+                    // Opaque fill + board-colored ring masks the connector under each circle
+                    "relative z-10 flex h-9 w-9 items-center justify-center rounded-full border-2 text-[11px] font-extrabold transition-all duration-300 ring-4 ring-[#031018]",
                     isActive &&
-                      "border-amber-300/80 bg-amber-400/25 text-amber-100 shadow-[0_0_16px_rgba(251,191,36,0.45)]",
-                    isPast && !isActive && "border-cyan-300/50 bg-cyan-400/30 text-cyan-50",
-                    !isActive && !isPast && "border-white/10 bg-white/5 text-cyan-200/35 opacity-45",
+                      "border-amber-300 bg-[#3b2a0a] text-amber-100 shadow-[0_0_18px_rgba(251,191,36,0.5)]",
+                    isPast && !isActive && "border-cyan-300 bg-[#0a3a45] text-cyan-50",
+                    !isActive && !isPast && "border-white/20 bg-[#0a1c24] text-cyan-200/55",
                   )}
                   title={s.title}
                 >
@@ -331,10 +333,10 @@ function GenericStageBoard({
           </ol>
         </div>
 
-        <div className="relative flex min-h-0 flex-1 flex-col justify-center px-0.5 pb-0.5">
+        <div className="relative flex min-h-0 flex-1 flex-col justify-center px-1 pb-1 pt-1">
           <div
             key={`stage-${safeActive}-${title}`}
-            className="mechanism-stage-card relative mx-auto flex w-full max-w-[22rem] flex-col gap-3 rounded-2xl border border-cyan-300/45 bg-[rgba(8,51,68,0.82)] px-3.5 py-3.5 shadow-[0_0_0_1px_rgba(34,211,238,0.28),0_16px_40px_rgba(8,145,178,0.35)] backdrop-blur-md"
+            className="mechanism-stage-card relative mx-auto flex w-full max-w-[22rem] flex-col gap-3.5 rounded-2xl border border-cyan-300/45 bg-[rgba(8,51,68,0.82)] px-4 py-4 shadow-[0_0_0_1px_rgba(34,211,238,0.28),0_16px_40px_rgba(8,145,178,0.35)] backdrop-blur-md"
             style={{ opacity: 0.55 + p * 0.45 }}
           >
             <span className="explainer-glow-ring pointer-events-none absolute inset-0 rounded-2xl" />

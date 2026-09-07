@@ -189,3 +189,64 @@ export function boardKindLabel(scene: LessonScene): string {
   if (scene.type === "summary") return "Takeaway";
   return "Explainer";
 }
+
+/** Deduped topic titles covered by concept scenes — for summary "What we covered". */
+export function lessonExplainedTopics(lesson: Lesson): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (raw: string) => {
+    const title = cleanBoardTitle(String(raw || "").trim());
+    if (!title) return;
+    const key = normalizeForCompare(title);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(clip(title, 56));
+  };
+
+  const concepts = (lesson.scenes || []).filter((s) => s.type === "concept");
+
+  let fromDiagram = false;
+  for (const scene of concepts) {
+    for (const step of scene.diagram_steps || []) {
+      const title = String(step?.title || "").trim();
+      if (title) {
+        push(title);
+        fromDiagram = true;
+      }
+    }
+  }
+  if (fromDiagram && out.length) return out;
+
+  for (const scene of concepts) {
+    for (const b of scene.bullets || []) push(String(b || ""));
+    for (const c of scene.visual?.callouts || []) push(String(c || ""));
+  }
+  if (out.length) return out;
+
+  for (const scene of concepts) {
+    for (const step of synthesizeBoardSteps(scene, lesson)) {
+      push(step.title);
+    }
+  }
+  return out;
+}
+
+/** One-line plain-English details aligned with lessonExplainedTopics titles. */
+export function lessonExplainedTopicDetails(lesson: Lesson): string[] {
+  const titles = lessonExplainedTopics(lesson);
+  const scenes = lesson.scenes || [];
+  const details: string[] = [];
+  for (const scene of scenes) {
+    if (scene.type !== "concept") continue;
+    const steps = scene.diagram_steps || [];
+    if (steps.length) {
+      for (const step of steps) {
+        details.push(String(step.detail || "").trim());
+      }
+      break;
+    }
+  }
+  while (details.length < titles.length) details.push("");
+  return details.slice(0, titles.length);
+}
+

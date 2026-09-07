@@ -58,7 +58,7 @@ export function KaraokeCaption({
         className,
       )}
     >
-      <p className="flex flex-wrap content-center gap-x-1.5 gap-y-1 text-[15px] font-semibold leading-6 tracking-tight text-zinc-300 sm:text-base">
+      <p className="flex flex-wrap content-center gap-x-2.5 gap-y-1.5 text-[15px] font-semibold leading-6 tracking-normal text-zinc-300 sm:text-base">
         {windowWords.length ? (
           windowWords.map((word) => {
             const isActive = word.index === active;
@@ -67,7 +67,7 @@ export function KaraokeCaption({
               <span
                 key={`${word.index}-${word.text}`}
                 className={cn(
-                  "karaoke-word inline-block transition-all duration-100",
+                  "karaoke-word inline-block px-0.5 mx-px transition-all duration-100",
                   isActive && "karaoke-word-active",
                   isPast && !isActive && "text-white",
                   !isPast && !isActive && "text-zinc-500",

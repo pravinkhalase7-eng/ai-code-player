@@ -6,7 +6,7 @@ import { buildCues, cueAt } from "@/lib/narrationSync";
 import { beatHighlight, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
 import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
 import { isPosterScene, reelCta } from "@/lib/reelCta";
-import { isExplainMotionLesson, synthesizeBoardSteps } from "@/lib/explainerVisuals";
+import { isExplainMotionLesson, lessonExplainedTopics, synthesizeBoardSteps } from "@/lib/explainerVisuals";
 import { infoBulletAt } from "@/lib/infoReelAnim";
 
 const WIDTH = 720;
@@ -869,6 +869,15 @@ function drawConceptPanel(
   const explainer =
     lesson?.reel_mode === "explainer" || Boolean(scene.diagram_steps && scene.diagram_steps.length);
 
+  // Summary end-card: animated checklist of every concept topic explained.
+  if (lesson && scene.type === "summary") {
+    const topics = lessonExplainedTopics(lesson);
+    if (topics.length) {
+      drawSummaryRecap(ctx, scene, elapsed, duration, topic, topics, panelTop, panelH, x, w);
+      return;
+    }
+  }
+
   const t = elapsed;
   const orbs = explainer
     ? [
@@ -966,15 +975,15 @@ function drawConceptPanel(
     const ai = Math.max(0, Math.min(anim.active, Math.max(0, count - 1)));
     const examples = steps.length ? steps.map((s) => s.example || "") : bullets.map(() => "");
     const padX = pad;
-    const miniY = y + 6;
-    const miniR = 9;
-    const trackLeft = x + padX + 18;
-    const trackRight = x + w - padX - 18;
+    const miniY = y + 10;
+    const miniR = 11;
+    const trackLeft = x + padX + 22;
+    const trackRight = x + w - padX - 22;
     const trackW = Math.max(40, trackRight - trackLeft);
 
-    // Track
+    // Track under nodes (drawn first)
     ctx.save();
-    ctx.strokeStyle = "rgba(34,211,238,0.16)";
+    ctx.strokeStyle = "rgba(34,211,238,0.2)";
     ctx.lineWidth = 3;
     ctx.lineCap = "round";
     ctx.beginPath();
@@ -982,7 +991,7 @@ function drawConceptPanel(
     ctx.lineTo(trackRight, miniY);
     ctx.stroke();
     const drawFrac = count <= 1 ? 1 : ai / Math.max(1, count - 1);
-    ctx.strokeStyle = "rgba(34,211,238,0.65)";
+    ctx.strokeStyle = "rgba(34,211,238,0.7)";
     ctx.shadowColor = "rgba(34,211,238,0.4)";
     ctx.shadowBlur = 8;
     ctx.beginPath();
@@ -996,25 +1005,33 @@ function drawConceptPanel(
       const active = index === ai && visible;
       const past = visible && index < ai;
       const cx = count <= 1 ? (trackLeft + trackRight) / 2 : trackLeft + (trackW * index) / Math.max(1, count - 1);
+      // Opaque board-colored halo so the connector never bleeds through the circle
+      ctx.beginPath();
+      ctx.arc(cx, miniY, miniR + 5, 0, Math.PI * 2);
+      ctx.fillStyle = "#031018";
+      ctx.fill();
       ctx.beginPath();
       ctx.arc(cx, miniY, miniR, 0, Math.PI * 2);
       if (active) {
-        ctx.fillStyle = "#fbbf24";
+        ctx.fillStyle = "#3b2a0a";
         ctx.shadowColor = "rgba(251,191,36,0.55)";
         ctx.shadowBlur = 12;
       } else if (past) {
-        ctx.fillStyle = "rgba(34,211,238,0.85)";
+        ctx.fillStyle = "#0a3a45";
         ctx.shadowBlur = 0;
       } else {
-        ctx.fillStyle = "rgba(255,255,255,0.12)";
+        ctx.fillStyle = "#0a1c24";
         ctx.shadowBlur = 0;
       }
       ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.fillStyle = active ? "#09090b" : past ? "#083344" : "rgba(207,250,254,0.35)";
-      ctx.font = "800 10px ui-sans-serif, system-ui";
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = active ? "#fcd34d" : past ? "#67e8f9" : "rgba(255,255,255,0.22)";
+      ctx.stroke();
+      ctx.fillStyle = active ? "#fef3c7" : past ? "#ecfeff" : "rgba(207,250,254,0.55)";
+      ctx.font = "800 11px ui-sans-serif, system-ui";
       ctx.textAlign = "center";
-      ctx.fillText(String(index + 1), cx, miniY + 3);
+      ctx.fillText(String(index + 1), cx, miniY + 4);
     }
 
     // Traveling token
@@ -1036,7 +1053,7 @@ function drawConceptPanel(
     }
 
     // ONE big active card
-    const cardTop = miniY + 28;
+    const cardTop = miniY + 40;
     const cardH = Math.max(160, panelTop + panelH - pad - cardTop);
     const cardX = x + padX;
     const cardW = w - padX * 2;
@@ -1138,6 +1155,102 @@ function drawConceptPanel(
     ctx.restore();
   });
 }
+
+function drawSummaryRecap(
+  ctx: CanvasRenderingContext2D,
+  scene: LessonScene,
+  elapsed: number,
+  duration: number,
+  topic: string,
+  topics: string[],
+  panelTop: number,
+  panelH: number,
+  x: number,
+  w: number,
+) {
+  const t = elapsed;
+  const orbs = [
+    { cx: 90, cy: panelTop + 40, r: 70, color: "rgba(34,211,238,0.28)", drift: 1 },
+    { cx: WIDTH - 130, cy: panelTop + 160, r: 58, color: "rgba(251,191,36,0.22)", drift: 1.4 },
+    { cx: 140, cy: panelTop + panelH - 40, r: 48, color: "rgba(45,212,191,0.18)", drift: 0.8 },
+  ];
+  for (const orb of orbs) {
+    const ox = Math.sin(t * orb.drift) * 10;
+    const oy = Math.cos(t * orb.drift * 0.9) * 12;
+    const g = ctx.createRadialGradient(orb.cx + ox, orb.cy + oy, 4, orb.cx + ox, orb.cy + oy, orb.r);
+    g.addColorStop(0, orb.color);
+    g.addColorStop(1, "transparent");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(orb.cx + ox, orb.cy + oy, orb.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(103,232,249,0.95)";
+  ctx.font = "700 16px ui-sans-serif, system-ui";
+  ctx.fillText("WHAT WE COVERED", WIDTH / 2, 88);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 26px ui-sans-serif, system-ui";
+  wrapLines(ctx, topic, WIDTH - 120, 2).forEach((line, index) => {
+    ctx.fillText(line, WIDTH / 2, 122 + index * 30);
+  });
+  ctx.textAlign = "left";
+
+  roundRect(ctx, x, panelTop, w, panelH, 22);
+  ctx.fillStyle = "rgba(3,16,24,0.94)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(34,211,238,0.28)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  const anim = infoBulletAt(topics, elapsed, duration);
+  const pad = 18;
+  let y = panelTop + pad + 6;
+  const rowH = Math.min(58, Math.max(42, (panelH - pad * 2 - 56) / Math.max(1, topics.length)));
+  topics.forEach((item, index) => {
+    const visible = index < anim.visibleCount;
+    const active = index === anim.active && visible;
+    if (!visible) return;
+    const by = y + index * rowH;
+    if (by + rowH > panelTop + panelH - 40) return;
+    ctx.save();
+    roundRect(ctx, x + pad, by, w - pad * 2, rowH - 8, 14);
+    ctx.fillStyle = active ? "rgba(251,191,36,0.18)" : "rgba(0,0,0,0.4)";
+    ctx.fill();
+    ctx.strokeStyle = active ? "rgba(251,191,36,0.55)" : "rgba(255,255,255,0.1)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + pad + 22, by + (rowH - 8) / 2, 11, 0, Math.PI * 2);
+    ctx.fillStyle = active ? "#fbbf24" : "rgba(34,211,238,0.85)";
+    ctx.fill();
+    ctx.fillStyle = "#083344";
+    ctx.font = "800 11px ui-sans-serif, system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText("✓", x + pad + 22, by + (rowH - 8) / 2 + 4);
+    ctx.textAlign = "left";
+    ctx.fillStyle = active ? "#fef3c7" : "#f4f4f5";
+    ctx.font = active ? "800 16px ui-sans-serif, system-ui" : "600 15px ui-sans-serif, system-ui";
+    wrapLines(ctx, item, w - pad * 2 - 56, 2).forEach((line, li) => {
+      ctx.fillText(line, x + pad + 52, by + 20 + li * 18);
+    });
+    ctx.restore();
+  });
+
+  const takeaways = (scene.takeaways || []).map((t) => String(t || "").trim()).filter(Boolean);
+  const footerLine = takeaways.length
+    ? takeaways.slice(0, 2).join(" · ")
+    : "Follow for more · @techshalabypavi";
+  ctx.fillStyle = "rgba(253,230,138,0.85)";
+  ctx.font = "600 13px ui-sans-serif, system-ui";
+  ctx.textAlign = "center";
+  wrapLines(ctx, footerLine, w - 36, 2).forEach((line, index) => {
+    ctx.fillText(line, x + w / 2, panelTop + panelH - 28 + index * 16);
+  });
+  ctx.textAlign = "left";
+}
+
 
 function drawFrame(
   ctx: CanvasRenderingContext2D,
@@ -1294,10 +1407,14 @@ function drawFrame(
   let kx = boxX + 16;
   let ky = boxY + 40;
   const maxX = boxX + boxW - 16;
-  const lineH = 28;
+  const lineH = 30;
+  // Match UI: gap-x-2.5 (~10px) + px-0.5 padding so scaled active words do not collide.
+  const wordGap = 10;
+  const wordPad = 3;
   for (const word of windowWords) {
-    const metrics = ctx.measureText(word.text + " ");
-    if (kx + metrics.width > maxX) {
+    const textW = ctx.measureText(word.text).width;
+    const advance = textW + wordPad * 2 + wordGap;
+    if (kx + advance > maxX) {
       kx = boxX + 16;
       ky += lineH;
       if (ky > boxY + boxH - 12) break;
@@ -1305,16 +1422,20 @@ function drawFrame(
     const isActive = word.index === active;
     const isPast = word.index < active;
     ctx.fillStyle = isActive ? "#fde68a" : isPast ? "#ffffff" : "#a1a1aa";
+    const drawX = kx + wordPad;
     if (isActive) {
       ctx.save();
       ctx.shadowColor = "rgba(251,191,36,0.55)";
       ctx.shadowBlur = 16;
-      ctx.fillText(word.text, kx, ky);
+      // Mild scale (~1.07) from bottom-center without overlapping neighbors.
+      ctx.translate(drawX + textW / 2, ky);
+      ctx.scale(1.07, 1.07);
+      ctx.fillText(word.text, -textW / 2, 0);
       ctx.restore();
     } else {
-      ctx.fillText(word.text, kx, ky);
+      ctx.fillText(word.text, drawX, ky);
     }
-    kx += metrics.width;
+    kx += advance;
   }
   if (!windowWords.length) {
     ctx.fillStyle = "#fff";

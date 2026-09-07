@@ -12,7 +12,7 @@ import { boardStateFromSteps } from "@/lib/hashmapPhase";
 import { sourceFilename } from "@/lib/language";
 import { beatHighlight, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
 import { isPosterScene, reelCta } from "@/lib/reelCta";
-import { boardKindLabel, isExplainMotionLesson, synthesizeBoardSteps } from "@/lib/explainerVisuals";
+import { boardKindLabel, isExplainMotionLesson, lessonExplainedTopicDetails, lessonExplainedTopics, synthesizeBoardSteps } from "@/lib/explainerVisuals";
 import { beatsFromSegments, infoBulletAt, infoBulletAtBeats, playInfoBulletBlip } from "@/lib/infoReelAnim";
 import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
 import { cn } from "@/lib/utils";
@@ -91,6 +91,19 @@ export function ReelStage({
     // so kind:none never leaves a blank stage on explainer/info.
     return synthesizeBoardSteps(scene, lesson);
   }, [scene, lesson]);
+  const explainedTopics = useMemo(
+    () => (explainMotion || isExplainMotionLesson(lesson) ? lessonExplainedTopics(lesson) : []),
+    [explainMotion, lesson],
+  );
+  const explainedTopicDetails = useMemo(
+    () => (explainMotion || isExplainMotionLesson(lesson) ? lessonExplainedTopicDetails(lesson) : []),
+    [explainMotion, lesson],
+  );
+  const summaryRecap = scene.type === "summary" && explainedTopics.length > 0;
+  const summaryTakeaways = useMemo(
+    () => (scene.takeaways || []).map((t) => String(t || "").trim()).filter(Boolean),
+    [scene.takeaways],
+  );
   const hashmapVisual = useMemo((): HashMapVisual | null => {
     const raw = scene.visual_diagram;
     if (raw && raw.kind === "hashmap") return raw;
@@ -118,16 +131,22 @@ export function ReelStage({
   const stepTitles = useMemo(() => diagramSteps.map((s) => s.title), [diagramSteps]);
   // Prefer diagram phase titles when hashmap explainer has diagram_steps; else put codes
   const syncTitles =
-    hashmapVisual && diagramSteps.length
-      ? stepTitles
-      : putTitles.length
-        ? putTitles
-        : isExplainer
-          ? stepTitles
-          : scene.bullets || [];
+    summaryRecap
+      ? explainedTopics
+      : hashmapVisual && diagramSteps.length
+        ? stepTitles
+        : putTitles.length
+          ? putTitles
+          : isExplainer
+            ? stepTitles
+            : scene.bullets || [];
   const infoAnim = useMemo(() => {
     if (!isConcept) return null;
     const segs = scene.segments || [];
+    // Summary recap: reveal every explained topic across the end-card window.
+    if (summaryRecap) {
+      return infoBulletAt(explainedTopics, currentTime, duration);
+    }
     // When diagram step count differs from narration segments, equal-split steps across
     // the real clip duration so every phase (e.g. 5 board steps) still appears on screen.
     if (diagramSteps.length >= 2 && Math.abs(diagramSteps.length - segs.length) >= 1) {
@@ -141,6 +160,8 @@ export function ReelStage({
     return infoBulletAt(syncTitles, currentTime, duration);
   }, [
     isConcept,
+    summaryRecap,
+    explainedTopics,
     hashmapVisual,
     diagramSteps.length,
     stepTitles,
@@ -269,7 +290,7 @@ export function ReelStage({
                   : "border-violet-200/30 bg-violet-300/10 text-violet-100",
               )}
             >
-              {explainMotion ? boardKindLabel(scene) : isExplainer ? "Explainer" : "Explain"}
+              {summaryRecap ? "Recap" : explainMotion ? boardKindLabel(scene) : isExplainer ? "Explainer" : "Explain"}
             </p>
             {scene.type === "intro" && currentTime < 2.6 && !diagramSteps[0]?.title ? (
               <p className="reel-cta-pulse mt-2 inline-flex rounded-full bg-amber-400 px-4 py-1.5 text-sm font-extrabold uppercase tracking-wide text-zinc-950">
@@ -277,9 +298,13 @@ export function ReelStage({
               </p>
             ) : null}
             <h2 className="mt-2 line-clamp-2 text-2xl font-extrabold leading-7 tracking-tight text-white">{topic}</h2>
-            {scene.type === "summary" && (scene.takeaways || []).length ? (
+            {summaryRecap ? (
               <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-200/90">
-                End card · {Math.min((infoAnim?.visibleCount ?? 1), (scene.takeaways || []).length)} reveals
+                What we covered · {Math.min(infoAnim?.visibleCount ?? 1, explainedTopics.length)}/{explainedTopics.length}
+              </p>
+            ) : scene.type === "summary" && summaryTakeaways.length ? (
+              <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-200/90">
+                End card · {Math.min((infoAnim?.visibleCount ?? 1), summaryTakeaways.length)} reveals
               </p>
             ) : null}
           </header>
@@ -301,7 +326,61 @@ export function ReelStage({
         />
       </div>
           <div className="relative z-10 flex min-h-0 flex-1 flex-col items-stretch justify-center py-1">
-            {isExplainer && hashmapVisual ? (
+            {summaryRecap ? (
+              <div className="flex max-h-full min-h-0 flex-col gap-2 overflow-y-auto rounded-2xl border border-cyan-200/25 bg-[#031018]/94 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+                <p className="text-center text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-200/90">
+                  What we covered
+                </p>
+                <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+                  {explainedTopics.map((item, index) => {
+                    const visible = (infoAnim?.visibleCount ?? 0) > index;
+                    const active = infoAnim?.active === index;
+                    const detail = explainedTopicDetails[index] || "";
+                    return (
+                      <div
+                        key={`recap-${index}-${item}`}
+                        className={cn(
+                          "info-bullet flex items-start gap-3 rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-zinc-100",
+                          visible && "is-visible",
+                          active && "is-active",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold",
+                            visible
+                              ? "bg-emerald-400/25 text-emerald-100"
+                              : "bg-cyan-400/25 text-cyan-50",
+                          )}
+                          aria-hidden
+                        >
+                          {visible ? "✓" : index + 1}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[14px] font-semibold leading-5 tracking-normal">
+                            {item}
+                          </span>
+                          {detail ? (
+                            <span className="mt-0.5 block text-[11px] font-medium leading-4 text-cyan-100/75">
+                              {detail}
+                            </span>
+                          ) : null}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {summaryTakeaways.length ? (
+                  <p className="mt-1 line-clamp-2 text-center text-[11px] font-medium leading-4 text-amber-100/80">
+                    {summaryTakeaways.slice(0, 2).join(" · ")}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-200/80">
+                    {cta.endAction}
+                  </p>
+                )}
+              </div>
+            ) : isExplainer && hashmapVisual ? (
               <HashMapBoard
                 visual={hashmapVisual}
                 activePutIndex={activePutIndex}

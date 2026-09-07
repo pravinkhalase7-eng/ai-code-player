@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a0f05"/>
+      <stop offset="100%" stop-color="#431407"/>
+    </linearGradient>
+  </defs>
+  <rect width="1080" height="1920" fill="url(#bg)"/>
+  <circle cx="921" cy="181" r="241" fill="#f97316" fill-opacity="0.18"/>
+  <circle cx="120" cy="1680" r="321" fill="#fb923c" fill-opacity="0.12"/>
+  <rect x="72" y="96" rx="28" width="360" height="72" fill="#fff"/>
+  <text x="252" y="144" text-anchor="middle" font-size="28" font-family="ui-sans-serif, system-ui" font-weight="800" fill="#18181b">TECHSHALA</text>
+  <text x="72" y="240" font-size="26" font-family="ui-sans-serif, system-ui" letter-spacing="8" fill="#fb923c">JAVA</text>
+  <text x="72" y="430" font-size="92" font-family="ui-sans-serif, system-ui, sans-serif" font-weight="800" fill="#ffedd5">What is a Thread?</text><text x="72" y="550" font-size="36" font-family="ui-sans-serif, system-ui" fill="#a1a1aa">Java threads and concurrency</text>
+  <rect x="72" y="340" rx="22" width="220" height="52" fill="#fb923c" fill-opacity="0.18" stroke="#fb923c" stroke-opacity="0.65"/><text x="182" y="374" text-anchor="middle" font-size="22" font-family="ui-sans-serif, system-ui" font-weight="800" letter-spacing="3" fill="#fb923c">INFO REEL</text>
+  <circle cx="540" cy="1180" r="351" fill="#f97316" fill-opacity="0.08"/>
+  <circle cx="540" cy="1180" r="271" fill="#fb923c" fill-opacity="0.14"/>
+  <circle cx="540" cy="1180" r="231" fill="#f97316" fill-opacity="0.28"/>
+  <circle cx="500" cy="1130" r="80" fill="#fff" fill-opacity="0.18"/>
+  <text x="540" y="1192" text-anchor="middle" font-size="34" font-family="ui-sans-serif, system-ui"
+        font-weight="800" letter-spacing="6" fill="#ffedd5">CONCEPT</text>
+  <g transform="translate(298,1001)"><rect x="-70.0" y="-28.0" width="140" height="56" rx="28.0" fill="#09090b" fill-opacity="0.78" stroke="#fb923c" stroke-opacity="0.55" stroke-width="2"/><text text-anchor="middle" dominant-baseline="central" font-size="26" font-family="ui-sans-serif, system-ui" font-weight="700" fill="#ffedd5">Thread</text></g><g transform="translate(799,1053)"><rect x="-113.0" y="-26.5" width="226" height="53" rx="26.5" fill="#09090b" fill-opacity="0.78" stroke="#fb923c" stroke-opacity="0.55" stroke-width="2"/><text text-anchor="middle" dominant-baseline="central" font-size="24" font-family="ui-sans-serif, system-ui" font-weight="700" fill="#ffedd5">concurrency</text></g><g transform="translate(267,1284)"><rect x="-95.0" y="-25.0" width="190" height="50" rx="25.0" fill="#09090b" fill-opacity="0.78" stroke="#fb923c" stroke-opacity="0.55" stroke-width="2"/><text text-anchor="middle" dominant-baseline="central" font-size="23" font-family="ui-sans-serif, system-ui" font-weight="700" fill="#ffedd5">Core idea</text></g><g transform="translate(801,1320)"><rect x="-70.0" y="-25.5" width="140" height="51" rx="25.5" fill="#09090b" fill-opacity="0.78" stroke="#fb923c" stroke-opacity="0.55" stroke-width="2"/><text text-anchor="middle" dominant-baseline="central" font-size="23" font-family="ui-sans-serif, system-ui" font-weight="700" fill="#ffedd5">Why</text></g>
+
+  <text x="72" y="1760" font-size="30" font-family="ui-sans-serif, system-ui" fill="#fb923c">@techshalabypavi</text>
+  <text x="72" y="1820" font-size="24" font-family="ui-sans-serif, system-ui" letter-spacing="4" fill="#a1a1aa">AI CODING TUTOR</text>
+  <rect x="193" y="1640" width="180" height="8" rx="4" fill="#f97316" fill-opacity="0.7"/>
+</svg>

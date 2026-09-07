@@ -1,0 +1,19 @@
+  async function downloadReel() {
+    if (videoBlob && !exporting) {
+      downloadBlob(videoBlob, `${safeReelName(lesson.topic)}.${fileExtension(videoBlob)}`);
+      setExportLabel("Downloaded — tap Download again anytime");
+      return;
+    }
+    if (reelReview) {
+      try {
+        const next = scriptIsDirty() ? await persistDraft() : lesson;
+        setReelReview(false);
+        await recordReelVideo(next);
+      } catch (err) {
+        setExportLabel(err instanceof Error ? err.message : "Could not export the reel");
+      }
+      return;
+    }
+    await recordReelVideo(lesson);
+  }
+
