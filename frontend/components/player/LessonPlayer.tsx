@@ -309,9 +309,9 @@ export function LessonPlayer({
       if (audio && Number.isFinite(audio.duration) && audio.duration > 0.4) {
         const segEnds = (scene.segments || []).map((s) => Number(s.end) || 0);
         const lastSegEnd = segEnds.length ? Math.max(...segEnds) : 0;
-        // Prefer real WAV length. Only trim huge trailing TTS silence vs cue clocks.
-        if (lastSegEnd > 1 && audio.duration > lastSegEnd + 8) {
-          lockedDuration = lastSegEnd + 0.6;
+        // Prefer real WAV length. Trim trailing TTS silence vs cue clocks.
+        if (lastSegEnd > 1 && audio.duration > lastSegEnd + 1.2) {
+          lockedDuration = lastSegEnd + 0.35;
         } else {
           lockedDuration = audio.duration;
         }
@@ -676,6 +676,8 @@ export function LessonPlayer({
           poster = "";
         }
       }
+      setExportLabel("Waiting for voice…");
+      source = await waitForLessonAudio(source);
       const blob = await exportReelVideo(
         { ...source, thumbnail_url: poster || source.thumbnail_url },
         (progress) => {

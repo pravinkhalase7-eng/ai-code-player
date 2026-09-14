@@ -43,6 +43,12 @@ def test_speech_text_strips_backticks() -> None:
     assert speech_text("Use **this** line") == "Use this line"
 
 
+def test_speech_text_joins_staccato_sentences() -> None:
+    spoken = speech_text("Watch this. i starts at zero. Then it jumps.")
+    assert "Watch this, i starts at zero" in spoken
+    assert spoken.count(".") == 2
+
+
 def test_teachable_narration_rejects_pasted_java() -> None:
     from app.services.locale import looks_like_source_code, teachable_narration
 

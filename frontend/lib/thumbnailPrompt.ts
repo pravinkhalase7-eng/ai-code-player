@@ -49,7 +49,8 @@ export function buildThumbnailPrompt(lesson: Lesson, seed = 42): string {
     `Create a highly catchy, high-CTR vertical 9:16 thumbnail/poster for a programming video. ` +
     `Topic: ${topic}. Language: ${language}. Format: ${explain}. ` +
     `Main headline in huge bold typography: "${headline}". ` +
-    `Curiosity hook in a smaller highly contrasting text box: "${hook}". ` +
+    `Curiosity hook in a bright contrasting box: "${hook}". ` +
+    `If this is a coding short, show a real code snippet with ONE teaching line highlighted, a red circle on that line, and a play button that says tap to watch the full short. ` +
     `Visual: ${visual}. ` +
     `Composition: logo/main visual upper-middle; headline near center huge bold; curiosity hook in contrasting box; ` +
     `keep text off extreme edges; mobile-clear; strong vertical flow; clean uncluttered. ` +

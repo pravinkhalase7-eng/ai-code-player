@@ -241,12 +241,15 @@ def test_reel_svg_thumbnail_includes_topic(tmp_path) -> None:
     from app.config import settings
 
     dest = tmp_path / "poster.svg"
-    write_svg_poster(dest, "Java for loop", "30s: Java For Loop", "java")
+    write_svg_poster(dest, "Java for loop", "30s: Java For Loop", "java", JAVA_FOR)
     body = dest.read_text()
     assert "Java For Loop" in body
     assert body.count("Java for loop") == 0
     assert "TECHSHALA" in body
     assert "BYTE" not in body
+    assert "SPOT IT" not in body
+    assert "TAP TO WATCH THE FULL SHORT" not in body
+    assert "for (int i" in body
 
     original = settings.storage_path
     original_provider = settings.image_provider
@@ -254,7 +257,7 @@ def test_reel_svg_thumbnail_includes_topic(tmp_path) -> None:
     settings.image_provider = "local"
     try:
         url = ensure_reel_thumbnail("les_thumb", "Java for loop", "30s: Java For Loop", "java")
-        assert ".svg" in url
+        assert ".svg" in url or ".png" in url
         assert (tmp_path / "images" / "thumb_les_thumb.svg").exists()
     finally:
         settings.storage_path = original
@@ -295,7 +298,7 @@ def test_teaching_text_roundtrip_keeps_code() -> None:
     assert code_scene.code == original.code
 
 
-def test_fit_reel_durations_total_about_30_seconds() -> None:
+def test_fit_reel_durations_does_not_pad_short_speech() -> None:
     from app.agents.orchestrator import _fit_reel_durations
 
     payload = valid_lesson_payload()
@@ -305,21 +308,36 @@ def test_fit_reel_durations_total_about_30_seconds() -> None:
     lesson = Lesson.model_validate(payload)
     fitted = _fit_reel_durations(lesson)
     total = sum(scene.duration for scene in fitted.scenes)
-    assert 28.0 <= total <= 32.0
+    assert total < 26.0
 
 
-def test_fit_reel_durations_scales_to_60_and_90_seconds() -> None:
+def test_fit_reel_durations_squeezes_overlong_speech() -> None:
     from app.agents.orchestrator import _fit_reel_durations
 
     payload = valid_lesson_payload()
     payload["format"] = "reel"
+    payload["reel_seconds"] = 30
     payload["scenes"] = [scene for scene in payload["scenes"] if scene["type"] != "quiz"]
-    for seconds in (60, 90, 120):
-        payload["reel_seconds"] = seconds
-        lesson = Lesson.model_validate(payload)
-        fitted = _fit_reel_durations(lesson)
-        total = sum(scene.duration for scene in fitted.scenes)
-        assert seconds - 3 <= total <= seconds + 3, (seconds, total)
+    long_line = "This line keeps teaching the same idea with more spoken words. " * 12
+    for scene in payload["scenes"]:
+        scene["narration"] = long_line
+    lesson = Lesson.model_validate(payload)
+    fitted = _fit_reel_durations(lesson)
+    total = sum(scene.duration for scene in fitted.scenes)
+    assert total <= 33.0
+
+
+def test_fit_reel_durations_does_not_inflate_to_60() -> None:
+    from app.agents.orchestrator import _fit_reel_durations
+
+    payload = valid_lesson_payload()
+    payload["format"] = "reel"
+    payload["reel_seconds"] = 60
+    payload["scenes"] = [scene for scene in payload["scenes"] if scene["type"] != "quiz"]
+    lesson = Lesson.model_validate(payload)
+    fitted = _fit_reel_durations(lesson)
+    total = sum(scene.duration for scene in fitted.scenes)
+    assert total < 40.0
 
 
 def test_normalize_reel_seconds_snaps_to_choices() -> None:

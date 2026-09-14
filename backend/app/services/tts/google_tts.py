@@ -103,7 +103,7 @@ class GoogleTTS(TTSProvider):
     ) -> httpx.Response:
         audio_config: dict[str, object] = {
             "audioEncoding": encoding,
-            "speakingRate": round(max(0.85, min(1.05, speed if speed else 0.96)), 2),
+            "speakingRate": round(max(1.05, min(1.12, speed if speed else 1.05)), 2),
         }
         if sample_rate:
             audio_config["sampleRateHertz"] = sample_rate

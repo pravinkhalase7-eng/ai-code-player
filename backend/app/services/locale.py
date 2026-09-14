@@ -112,7 +112,31 @@ def speech_text(text: str) -> str:
     cleaned = _speakable_code(cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
     cleaned = re.sub(r"\s+([,.!?।;:])", r"\1", cleaned)
+    cleaned = _tighten_spoken_pauses(cleaned)
     return cleaned.strip()
+
+
+def _tighten_spoken_pauses(text: str) -> str:
+    """Join staccato clauses so Chirp does not pause after every short sentence."""
+    cleaned = re.sub(r"\.{2,}", ".", text or "")
+    cleaned = re.sub(r"।{2,}", "।", cleaned)
+    cleaned = re.sub(r"\s*\n+\s*", " ", cleaned)
+    parts = [part.strip() for part in re.split(r"(?<=[.!?।])\s+", cleaned) if part.strip()]
+    if len(parts) < 2:
+        return cleaned.strip()
+    merged: list[str] = []
+    index = 0
+    while index < len(parts):
+        current = parts[index]
+        words = len(re.findall(r"\S+", current))
+        nxt = parts[index + 1] if index + 1 < len(parts) else ""
+        if nxt and words <= 8 and current[-1] in ".।" and nxt[-1:] != "?":
+            merged.append(current.rstrip(".।") + ", " + nxt)
+            index += 2
+            continue
+        merged.append(current)
+        index += 1
+    return " ".join(merged)
 
 
 def _clean_type_token(token: str) -> str:

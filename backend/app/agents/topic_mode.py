@@ -91,7 +91,8 @@ Hard rules:
   - concept.visual.kind = "bullets"; callouts = the on-screen bullets.
   - summary.visual.kind = "takeaway"; callouts = the takeaways list.
 - Summary ({span(4, 6)}): One punchy takeaway. 2-3 short takeaways. Ask them to follow / save / comment.
-- Spoken style: short sentences, catchy, not a lecture. No filler.
+- Spoken style: flowing spoken lines, catchy, not a lecture. No filler.
+  Do NOT end every clause with a period. Link related clauses with commas so TTS does not pause between every sentence.
 - Never say "{target} seconds" or "in this short" in narration or titles.
 - spoken_language must match the tutor plan for all spoken lines, bullets, takeaways, and the title.
 - lesson_id should be a short slug.
@@ -189,7 +190,8 @@ Hard rules:
   - concept.visual.kind = "board"; callouts = diagram_steps titles (same order).
   - summary.visual.kind = "takeaway"; callouts = the takeaways list.
 - Summary ({span(4, 6)}): One punchy takeaway about the mechanism. 2-3 short takeaways. Ask them to follow / save / comment.
-- Spoken style: short sentences, catchy, not a lecture. No filler.
+- Spoken style: flowing spoken lines, catchy, not a lecture. No filler.
+  Do NOT end every clause with a period. Link related clauses with commas so TTS does not pause between every sentence.
 - Never say "{target} seconds" or "in this short" in narration or titles.
 - spoken_language must match the tutor plan for all spoken lines, bullets, diagram_steps (title/detail; keep code tokens in example), takeaways, and the title.
 - lesson_id should be a short slug.

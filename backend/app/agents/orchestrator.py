@@ -192,7 +192,8 @@ Hard rules:
   If the topic is variables / data types: the code MUST declare every common beginner type for that language in one program (Python: int, float, str, bool, list, tuple, dict, set, None). Do not ship a two-line int+string demo.
 - Execution ({span(6, 8)}): Same example. Say what THIS output proves about those lines. expected_output must be an empty list.
 - Summary ({span(4, 6)}): One punchy takeaway. 2-3 short takeaways max. End by asking them to follow, save, or comment which option they would use.
-- Spoken style: short sentences, no filler ("so", "basically", "in this video we will"). Catchy, not a lecture.
+- Spoken style: flowing spoken lines, not a lecture. No filler ("so", "basically", "in this video we will").
+  Do NOT end every clause with a period. Link related clauses with commas so TTS does not pause between every sentence.
 - Never say "{target} seconds", "30 seconds", "30s", "60 seconds", or "in this short" in narration, titles, or on-screen copy. Just teach the code.
 - Java: public class Main in Main.java. Python: complete main.py. JavaScript: complete main.js.
 - Never invent stdout. Never claim the code already ran.
@@ -212,6 +213,8 @@ Given a lesson JSON, ensure every code and execution scene contains complete, co
 Use Main.java / public class Main for Java, main.py for Python, and main.js for JavaScript.
 The example MUST demonstrate the requested topic (streams, loops, methods, etc.). Never leave main() empty.
 Never replace a Stream/filter/map example with an unrelated for-loop unless the topic is loops.
+Code narration MUST walk THIS example line by line: quote the tokens, say what happens, say why.
+If the code scene is only a stub like "let us walk through this code", replace that narration with a real walkthrough of the lines on screen.
 Do not invent stdout. Keep expected_output empty.
 Do not rewrite narration into English. Keep the existing spoken language.
 Return the full Lesson JSON.
@@ -487,8 +490,12 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
                 empty_main = True
         if scene.type in {"code", "execution"} and re.search(r"main\s*\([^)]*\)\s*\{\s*\}", code):
             empty_main = True
+    stub_code_talk = any(
+        scene.type == "code" and len((scene.narration or "").split()) < 40
+        for scene in lesson.scenes
+    )
     spoken_rules = f"{spoken_generation_rules(plan.spoken_language)}\n{CODE_TEACHING_RULES}"
-    if plan.requires_code and (not has_code or empty_main):
+    if plan.requires_code and (not has_code or empty_main or stub_code_talk):
         lesson = invoke_agent(CODE_AGENT, f"{spoken_rules}\n{lesson.model_dump_json()}")
         assert isinstance(lesson, Lesson)
         lesson.spoken_language = plan.spoken_language
@@ -877,37 +884,29 @@ def _fit_reel_durations(lesson: Lesson) -> Lesson:
     target = float(normalize_reel_seconds(lesson.reel_seconds))
     scale_ratio = target / 30.0
     caps = {
-        "intro": (5.5 * scale_ratio, 8.0 * scale_ratio),
-        "concept": (10.0 * scale_ratio, 16.0 * scale_ratio),
-        "code": (9.0 * scale_ratio, 14.0 * scale_ratio),
-        "execution": (5.5 * scale_ratio, 8.0 * scale_ratio),
-        "terminal": (4.0 * scale_ratio, 6.0 * scale_ratio),
-        "summary": (4.0 * scale_ratio, 6.0 * scale_ratio),
+        "intro": (2.8, 8.0 * scale_ratio),
+        "concept": (4.0, 16.0 * scale_ratio),
+        "code": (4.0, 14.0 * scale_ratio),
+        "execution": (2.8, 8.0 * scale_ratio),
+        "terminal": (2.4, 6.0 * scale_ratio),
+        "summary": (2.4, 6.0 * scale_ratio),
     }
     max_spoken = min(target * 0.55, 70.0)
-    min_spoken = max(3.5, target * 0.08)
+    min_spoken = 2.4
     raw: list[float] = []
     for scene in lesson.scenes:
         words = max(1, len(scene.narration.split()))
-        spoken = min(max_spoken, max(min_spoken, words / 2.6 + 0.6))
+        spoken = words / 2.6 + 0.4
         low, high = caps.get(scene.type, (min_spoken, max_spoken * 0.4))
         raw.append(min(high, max(low, spoken)))
     total = sum(raw) or 1.0
-    scale = target / total
+    # Never pad with silence to fill 30/60/90s — that is what made downloaded reels stall.
+    # Only squeeze if the script overshoots the chosen length.
+    scale = target / total if total > target * 1.05 else 1.0
     updated = []
     for scene, spoken in zip(lesson.scenes, raw, strict=True):
         duration = round(max(min_spoken, min(max_spoken, spoken * scale)), 1)
         updated.append(scene.model_copy(update={"duration": duration}))
-    fitted_total = sum(scene.duration for scene in updated) or 1.0
-    if abs(fitted_total - target) > 0.8:
-        nudge = target / fitted_total
-        updated = [
-            scene.model_copy(
-                update={"duration": round(max(min_spoken, min(max_spoken, scene.duration * nudge)), 1)}
-            )
-            for scene in updated
-        ]
-    # Keep cue clocks aligned with fitted durations (avoids 34s segments on a 19s scene).
     updated = [_rescale_scene_segments(scene, float(scene.duration)) for scene in updated]
     return lesson.model_copy(update={"scenes": updated})
 

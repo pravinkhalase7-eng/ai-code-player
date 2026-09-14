@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     tts_provider: str = "google"
     tts_fallback_provider: str = "google"
     tts_voice: str = "en-US-Chirp3-HD-Aoede"
-    tts_speed: float = 0.96
+    tts_speed: float = 1.05
     kokoro_url: str = "http://localhost:8880"
 
     image_provider: str = "local"

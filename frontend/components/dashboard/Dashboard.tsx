@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type MouseEvent } from "react";
-import { ArrowRight, Clapperboard, Expand, GitBranch, ImageIcon, Info, RefreshCw, Sparkles, Timer, Trash2, X } from "lucide-react";
+import { ArrowRight, Clapperboard, Expand, GitBranch, ImageIcon, Info, Play, RefreshCw, Sparkles, Timer, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -360,10 +360,23 @@ export function Dashboard() {
                   >
                     <Card className="overflow-hidden p-0 transition hover:border-amber-300/30">
                       {lesson.format === "reel" && lesson.thumbnail_url ? (
-                        <div className="relative h-36 w-full overflow-hidden bg-zinc-900 sm:h-44">
-                          <img src={lesson.thumbnail_url} alt="" className="h-full w-full object-cover" />
+                        <div className="relative aspect-[9/14] w-full overflow-hidden bg-zinc-900 sm:aspect-[9/16] sm:max-h-80">
+                          <img
+                            src={lesson.thumbnail_url}
+                            alt=""
+                            className="h-full w-full object-cover object-[center_48%]"
+                          />
+                          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-zinc-950/70 via-transparent to-zinc-950/20" />
                           <span className="absolute left-3 top-3 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-950">
                             {lesson.reel_seconds ? `${lesson.reel_seconds}s` : "Short"}
+                          </span>
+                          <span className="absolute inset-0 flex items-center justify-center">
+                            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/90 text-zinc-950 shadow-lg">
+                              <Play className="ml-0.5 h-6 w-6 fill-zinc-950" />
+                            </span>
+                          </span>
+                          <span className="absolute bottom-3 left-3 right-3 text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
+                            Play short
                           </span>
                         </div>
                       ) : lesson.format === "reel" ? (

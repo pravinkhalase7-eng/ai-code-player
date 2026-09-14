@@ -13,11 +13,12 @@ from app.services.tts.base import BrowserTTS, TTSProvider, tts_hash
 from app.services.tts.gemini_tts import GeminiTTS
 from app.services.tts.google_tts import GoogleTTS
 from app.services.tts.kokoro import KokoroTTS
+from app.services.tts.wav_trim import compact_wav_silence
 
 logger = logging.getLogger(__name__)
 
 MIN_AUDIO_BYTES = 256
-GOOGLE_CACHE_TAG = "google:linear16-24k"
+GOOGLE_CACHE_TAG = "google:linear16-24k-tightv1"
 
 
 def cache_provider_key(provider_name: str) -> str:
@@ -103,6 +104,8 @@ def synthesize_narration(
         try:
             written = get_provider(name).synthesize(spoken, requested_voice, speed, dest)
             if _usable_file(written):
+                if written.suffix.lower() == ".wav":
+                    compact_wav_silence(written)
                 used = name
                 produced = written
                 break
