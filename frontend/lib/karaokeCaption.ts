@@ -18,20 +18,22 @@ function splitWords(text: string): string[] {
 export function wordsForSpan(text: string, start: number, end: number, indexOffset = 0): KaraokeWord[] {
   const words = splitWords(text);
   if (!words.length) return [];
-  const span = Math.max(0.12, end - start);
+  // Chirp is a bit ahead of even word clocks — start highlights slightly early
+  // and finish the last word before the cue tail so captions do not lag speech.
+  const lead = 0.06;
+  const from = Math.max(0, start - lead);
+  const span = Math.max(0.12, (end - from) * 0.94);
   const weights = words.map((word) => Math.max(1, word.replace(/[^a-zA-Z0-9\u0900-\u097F]+/g, "").length || 1));
   const total = weights.reduce((sum, value) => sum + value, 0);
-  let cursor = start;
+  let cursor = from;
   return words.map((word, index) => {
-    // Slightly longer on early words — TTS often rushes the tail.
-    const bias = 1 + Math.max(0, (words.length - index) / words.length) * 0.15;
-    const slice = span * ((weights[index] * bias) / (total * 1.075));
+    const slice = span * (weights[index] / total);
     const wordStart = cursor;
     cursor += slice;
     return {
       text: word,
       start: wordStart,
-      end: index === words.length - 1 ? end : cursor,
+      end: index === words.length - 1 ? Math.max(wordStart + 0.08, end - 0.04) : cursor,
       index: indexOffset + index,
     };
   });

@@ -5,17 +5,17 @@ import math
 import wave
 from pathlib import Path
 
-# Keep a little air so consonants are not clipped, but collapse Chirp's
-# long sentence-final pauses that make downloaded reels feel stalled.
-_MAX_GAP_SEC = 0.12
-_LEAD_SEC = 0.03
-_TAIL_SEC = 0.06
+# Trim Chirp's long lead-in / tail only. Do NOT collapse mid-sentence pauses —
+# karaoke and board cues are timed to those pauses, and squeezing them desyncs captions.
+_LEAD_SEC = 0.04
+_TAIL_SEC = 0.08
 _FRAME_SEC = 0.02
-_RMS_FLOOR = 480.0
+_RMS_FLOOR = 520.0
+_PEAK_RATIO = 0.08
 
 
 def compact_wav_silence(path: Path | str) -> float | None:
-    """Rewrite a 16-bit WAV in place, collapsing long silent gaps.
+    """Rewrite a 16-bit WAV in place, dropping leading/trailing silence.
 
     Returns the new duration in seconds, or None if the file was left unchanged.
     """
@@ -31,50 +31,39 @@ def compact_wav_silence(path: Path | str) -> float | None:
             raw = handle.readframes(frames)
     except Exception:
         return None
-    if sample_width != 2 or rate <= 0 or not raw:
+    if sample_width != 2 or rate <= 0 or not raw or channels < 1:
         return None
 
     samples = array.array("h")
     samples.frombytes(raw)
-    frame = max(1, int(rate * _FRAME_SEC))
-    kept: list[int] = []
-    silent_run: list[int] = []
-    heard = False
-    max_gap = max(1, int(rate * _MAX_GAP_SEC) * channels)
-    lead = max(0, int(rate * _LEAD_SEC) * channels)
-
-    def flush_silence(final: bool = False) -> None:
-        if not silent_run:
-            return
-        if not heard:
-            if final:
-                return
-            kept.extend(silent_run[-lead:] if lead else [])
-            silent_run.clear()
-            return
-        keep = min(len(silent_run), max_gap)
-        if final:
-            keep = min(len(silent_run), max(1, int(rate * _TAIL_SEC) * channels))
-        kept.extend(silent_run[:keep])
-        silent_run.clear()
-
-    for index in range(0, len(samples), frame * channels):
-        chunk = samples[index : index + frame * channels]
+    frame = max(1, int(rate * _FRAME_SEC) * channels)
+    rms_values: list[float] = []
+    for index in range(0, len(samples), frame):
+        chunk = samples[index : index + frame]
         if not chunk:
             continue
-        rms = math.sqrt(sum(sample * sample for sample in chunk) / max(1, len(chunk)))
-        if rms >= _RMS_FLOOR:
-            flush_silence()
-            heard = True
-            kept.extend(chunk)
-        else:
-            silent_run.extend(chunk)
-    flush_silence(final=True)
-
-    if not heard or len(kept) < rate // 10:
+        rms_values.append(math.sqrt(sum(sample * sample for sample in chunk) / max(1, len(chunk))))
+    if not rms_values:
         return None
 
-    out = array.array("h", kept)
+    peak = max(rms_values)
+    floor = max(_RMS_FLOOR, peak * _PEAK_RATIO)
+    first = next((i for i, rms in enumerate(rms_values) if rms >= floor), -1)
+    last = next((i for i, rms in reversed(list(enumerate(rms_values))) if rms >= floor), -1)
+    if first < 0 or last < 0 or last < first:
+        return None
+
+    lead = max(0, int(rate * _LEAD_SEC) * channels)
+    tail = max(1, int(rate * _TAIL_SEC) * channels)
+    start = max(0, first * frame - lead)
+    end = min(len(samples), (last + 1) * frame + tail)
+    if end - start < rate // 10:
+        return None
+    # Skip rewrite when we would only drop a few milliseconds.
+    if start < frame and end >= len(samples) - frame:
+        return len(samples) / float(rate * channels)
+
+    out = array.array("h", samples[start:end])
     tmp = dest.with_suffix(dest.suffix + ".tmp")
     try:
         with wave.open(str(tmp), "wb") as handle:

@@ -8,6 +8,7 @@ import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
 import { isPosterScene, reelCta } from "@/lib/reelCta";
 import { isExplainMotionLesson, lessonExplainedTopics, synthesizeBoardSteps } from "@/lib/explainerVisuals";
 import { infoBulletAt } from "@/lib/infoReelAnim";
+import { sliceAudioBuffer, speechBounds } from "@/lib/speechEnvelope";
 
 const WIDTH = 720;
 const HEIGHT = 1280;
@@ -18,83 +19,15 @@ function pickRecorderMime(): string {
   const types = [
     "video/mp4",
     "video/mp4;codecs=avc1,mp4a.40.2",
-    "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
+    "video/webm;codecs=vp9,opus",
     "video/webm",
   ];
   return types.find((type) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) || "";
 }
 
-let ffmpegInstance: import("@ffmpeg/ffmpeg").FFmpeg | null = null;
-let ffmpegLoading: Promise<import("@ffmpeg/ffmpeg").FFmpeg> | null = null;
-
-async function getFFmpeg(onLog?: (message: string) => void) {
-  if (ffmpegInstance) return ffmpegInstance;
-  if (ffmpegLoading) return ffmpegLoading;
-  ffmpegLoading = (async () => {
-    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-    const { toBlobURL } = await import("@ffmpeg/util");
-    const ffmpeg = new FFmpeg();
-    ffmpeg.on("log", ({ message }) => onLog?.(message));
-    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm";
-    await ffmpeg.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-    });
-    ffmpegInstance = ffmpeg;
-    return ffmpeg;
-  })();
-  try {
-    return await ffmpegLoading;
-  } finally {
-    ffmpegLoading = null;
-  }
-}
-
 function isMp4Blob(blob: Blob): boolean {
   return /mp4|m4v|quicktime/i.test(blob.type || "");
-}
-
-async function convertBlobToMp4(
-  blob: Blob,
-  onProgress?: (progress: ReelExportProgress) => void,
-): Promise<Blob> {
-  if (isMp4Blob(blob)) return blob;
-  onProgress?.({ scene: 0, total: 0, label: "Converting to MP4…" });
-  const { fetchFile } = await import("@ffmpeg/util");
-  const ffmpeg = await getFFmpeg();
-  const inputName = blob.type.includes("webm") ? "input.webm" : "input.bin";
-  await ffmpeg.writeFile(inputName, await fetchFile(blob));
-  await ffmpeg.exec([
-    "-i",
-    inputName,
-    "-c:v",
-    "libx264",
-    "-preset",
-    "ultrafast",
-    "-pix_fmt",
-    "yuv420p",
-    "-c:a",
-    "aac",
-    "-movflags",
-    "+faststart",
-    "output.mp4",
-  ]);
-  const data = await ffmpeg.readFile("output.mp4");
-  try {
-    await ffmpeg.deleteFile(inputName);
-  } catch {
-    /* ignore cleanup errors */
-  }
-  try {
-    await ffmpeg.deleteFile("output.mp4");
-  } catch {
-    /* ignore cleanup errors */
-  }
-  const raw = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data));
-  const bytes = new Uint8Array(raw.byteLength);
-  bytes.set(raw);
-  return new Blob([bytes], { type: "video/mp4" });
 }
 
 async function decodeAudio(ctx: AudioContext, url: string | undefined): Promise<AudioBuffer | null> {
@@ -103,79 +36,11 @@ async function decodeAudio(ctx: AudioContext, url: string | undefined): Promise<
     const response = await fetch(url);
     const bytes = await response.arrayBuffer();
     const decoded = await ctx.decodeAudioData(bytes.slice(0));
-    return compactAudioBuffer(ctx, decoded);
+    const bounds = speechBounds(decoded.getChannelData(0), decoded.sampleRate);
+    return sliceAudioBuffer(ctx, decoded, bounds);
   } catch {
     return null;
   }
-}
-
-function compactAudioBuffer(ctx: AudioContext, buffer: AudioBuffer): AudioBuffer {
-  const rate = buffer.sampleRate;
-  const length = buffer.length;
-  const channel = buffer.getChannelData(0);
-  const frame = Math.max(1, Math.floor(rate * 0.02));
-  const maxGap = Math.floor(rate * 0.12);
-  const lead = Math.floor(rate * 0.03);
-  const tail = Math.floor(rate * 0.06);
-  const floor = 0.015;
-  const ranges: Array<[number, number]> = [];
-  let silentStart = -1;
-  let heard = false;
-
-  const rmsAt = (start: number) => {
-    let sum = 0;
-    const end = Math.min(length, start + frame);
-    for (let index = start; index < end; index += 1) sum += channel[index] * channel[index];
-    return Math.sqrt(sum / Math.max(1, end - start));
-  };
-
-  const pushRange = (start: number, end: number) => {
-    if (end <= start) return;
-    const last = ranges[ranges.length - 1];
-    if (last && last[1] === start) {
-      last[1] = end;
-      return;
-    }
-    ranges.push([start, end]);
-  };
-
-  const flushSilent = (end: number, final: boolean) => {
-    if (silentStart < 0) return;
-    const count = end - silentStart;
-    if (!heard) {
-      if (!final) pushRange(Math.max(silentStart, end - lead), end);
-      silentStart = -1;
-      return;
-    }
-    const keepCount = final ? Math.min(count, tail) : Math.min(count, maxGap);
-    pushRange(silentStart, silentStart + keepCount);
-    silentStart = -1;
-  };
-
-  for (let index = 0; index < length; index += frame) {
-    if (rmsAt(index) >= floor) {
-      flushSilent(index, false);
-      heard = true;
-      pushRange(index, Math.min(length, index + frame));
-    } else if (silentStart < 0) {
-      silentStart = index;
-    }
-  }
-  flushSilent(length, true);
-  const kept = ranges.reduce((sum, [start, end]) => sum + (end - start), 0);
-  if (!heard || kept < rate / 10) return buffer;
-
-  const compacted = ctx.createBuffer(buffer.numberOfChannels, kept, rate);
-  for (let channelIndex = 0; channelIndex < buffer.numberOfChannels; channelIndex += 1) {
-    const source = buffer.getChannelData(channelIndex);
-    const dest = compacted.getChannelData(channelIndex);
-    let offset = 0;
-    for (const [start, end] of ranges) {
-      dest.set(source.subarray(start, end), offset);
-      offset += end - start;
-    }
-  }
-  return compacted;
 }
 
 function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines = 4): string[] {
@@ -1553,12 +1418,12 @@ export async function exportReelVideo(
   const audioCtx = new AudioContext();
   await audioCtx.resume();
   const dest = audioCtx.createMediaStreamDestination();
-  const canvasStream = canvas.captureStream(30);
+  const canvasStream = canvas.captureStream(24);
   const mixed = new MediaStream([
     ...canvasStream.getVideoTracks(),
     ...dest.stream.getAudioTracks(),
   ]);
-  const recorder = new MediaRecorder(mixed, { mimeType: mime, videoBitsPerSecond: 3_500_000 });
+  const recorder = new MediaRecorder(mixed, { mimeType: mime, videoBitsPerSecond: 2_400_000 });
   const chunks: BlobPart[] = [];
   recorder.ondataavailable = (event) => {
     if (event.data.size) chunks.push(event.data);
@@ -1581,8 +1446,8 @@ export async function exportReelVideo(
       onProgress?.({ scene: index + 1, total: scenes.length, label: scene.type });
       const buffer = await decodeAudio(audioCtx, audioSrc(scene.audio_url));
       const spoken = estimatedSpeechDuration(scene.narration || "", 4);
-      // Never hold a silent scene for the padded 30/60/90s clock — that is the stall in downloads.
-      const duration = buffer?.duration || Math.min(0.45, spoken);
+      // Use voiced audio only (lead/tail trimmed). Never hold the padded 30/60/90s clock.
+      const duration = buffer?.duration || spoken;
       if (buffer) {
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
@@ -1614,18 +1479,7 @@ export async function exportReelVideo(
   }
 
   const recorded = await stopped;
-  if (isMp4Blob(recorded)) return recorded;
-  try {
-    return await convertBlobToMp4(recorded, onProgress);
-  } catch (error) {
-    console.warn("MP4 conversion failed; falling back to recorded blob", error);
-    onProgress?.({
-      scene: scenes.length,
-      total: scenes.length,
-      label: "Conversion failed — saving original format",
-    });
-    return recorded;
-  }
+  return recorded;
 }
 
 export function downloadBlob(blob: Blob, filename: string) {

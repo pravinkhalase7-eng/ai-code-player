@@ -19,6 +19,7 @@ import { audioSrc, cn } from "@/lib/utils";
 import { firstMeaningfulHighlight } from "@/lib/codeFocus";
 import { stripDurationNoise } from "@/lib/reelHeadlines";
 import { buildCues, cueAt } from "@/lib/narrationSync";
+import { measureSpeechEnd } from "@/lib/speechEnvelope";
 import { SPOKEN_LANGUAGES } from "@/lib/spokenLanguage";
 import type { ExecutionStep, HighlightRange, Lesson, LessonScene, RunHelp, TutorExpression } from "@/types/lesson";
 
@@ -76,8 +77,10 @@ export function LessonPlayer({
   const pendingPlay = useRef(false);
   const indexRef = useRef(index);
   const playingRef = useRef(playing);
+  const clipDurationRef = useRef(0);
   indexRef.current = index;
   playingRef.current = playing;
+  clipDurationRef.current = clipDuration;
 
   useEffect(() => {
     setCaption(scene?.narration ?? "");
@@ -88,6 +91,8 @@ export function LessonPlayer({
     setRunHelp(null);
     setCode(explainOnly ? "" : scene?.code?.trim() ? scene.code : exampleCode || "");
     setCurrentTime(0);
+    setClipDuration(0);
+    clipDurationRef.current = 0;
     if (scene?.type === "code") {
       setHighlight(firstMeaningfulHighlight(scene.code || exampleCode, scene.highlight_ranges ?? []) ?? null);
     } else if (scene?.type === "execution") {
@@ -100,6 +105,23 @@ export function LessonPlayer({
       setHighlight(null);
     }
   }, [index, scene, exampleCode, explainOnly]);
+
+  useEffect(() => {
+    const url = audioSrc(scene?.audio_url);
+    if (!url) {
+      setClipDuration(Math.max(0.4, Number(scene?.duration) || 0));
+      return undefined;
+    }
+    let cancelled = false;
+    void measureSpeechEnd(url).then((end) => {
+      if (cancelled || !end || end < 0.4) return;
+      clipDurationRef.current = end;
+      setClipDuration(end);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [scene?.id, scene?.audio_url, scene?.duration]);
 
   useEffect(() => {
     if (lesson.format !== "reel") return;
@@ -304,18 +326,25 @@ export function LessonPlayer({
     const speechStarted = Date.now();
     let lockedDuration: number | undefined;
     let frame = 0;
+    let advanced = false;
     const tick = () => {
       const audio = audioRef.current;
       if (audio && Number.isFinite(audio.duration) && audio.duration > 0.4) {
+        const measured = clipDurationRef.current;
         const segEnds = (scene.segments || []).map((s) => Number(s.end) || 0);
         const lastSegEnd = segEnds.length ? Math.max(...segEnds) : 0;
-        // Prefer real WAV length. Trim trailing TTS silence vs cue clocks.
-        if (lastSegEnd > 1 && audio.duration > lastSegEnd + 1.2) {
+        if (measured > 0.4) {
+          lockedDuration = Math.min(measured, audio.duration);
+        } else if (lastSegEnd > 1 && audio.duration > lastSegEnd + 1.2) {
+          // Prefer cue clocks over Chirp's long trailing pad.
           lockedDuration = lastSegEnd + 0.35;
         } else {
           lockedDuration = audio.duration;
         }
-        setClipDuration(lockedDuration);
+        if (Math.abs(measured - lockedDuration) > 0.05) {
+          clipDurationRef.current = lockedDuration;
+          setClipDuration(lockedDuration);
+        }
       }
       const cues = buildCues(scene, lockedDuration);
       let time = 0;
@@ -344,6 +373,12 @@ export function LessonPlayer({
         }
         if (cue.expression) setExpression(cue.expression);
         if (!manualStepping && typeof cue.stepIndex === "number") setStepIndex(cue.stepIndex);
+      }
+      if (!advanced && lockedDuration && lockedDuration > 0.4 && time >= lockedDuration - 0.05) {
+        advanced = true;
+        audio?.pause();
+        advanceScene();
+        return;
       }
       frame = window.requestAnimationFrame(tick);
     };
@@ -555,7 +590,7 @@ export function LessonPlayer({
         (item) => Boolean((item.narration || "").trim()) && !audioSrc(item.audio_url),
       );
       if (!missing) return current;
-      await new Promise((resolve) => window.setTimeout(resolve, 1200));
+      await new Promise((resolve) => window.setTimeout(resolve, 700));
       const payload = await getLesson(current.lesson_id);
       current = payload.lesson;
       onLessonChange?.(current);
@@ -640,7 +675,7 @@ export function LessonPlayer({
       setExportLabel(
         fileExtension(videoBlob) === "mp4"
           ? "Downloaded MP4 — tap Download again anytime"
-          : "Downloaded (WebM fallback) — MP4 conversion unavailable",
+          : "Downloaded — tap Download again anytime",
       );
       return;
     }
@@ -681,14 +716,6 @@ export function LessonPlayer({
       const blob = await exportReelVideo(
         { ...source, thumbnail_url: poster || source.thumbnail_url },
         (progress) => {
-          if (/converting to mp4/i.test(progress.label)) {
-            setExportLabel("Converting to MP4…");
-            return;
-          }
-          if (/conversion failed/i.test(progress.label)) {
-            setExportLabel(progress.label);
-            return;
-          }
           if (progress.total > 0) {
             setExportLabel(`Scene ${progress.scene}/${progress.total} · ${progress.label}`);
           } else {
@@ -701,7 +728,7 @@ export function LessonPlayer({
       setExportLabel(
         ext === "mp4"
           ? "MP4 ready — download it"
-          : "Saved as WebM — MP4 conversion failed on this device",
+          : "Video ready — download it",
       );
       downloadBlob(blob, reelDownloadName(source.topic, blob));
     } catch (err) {

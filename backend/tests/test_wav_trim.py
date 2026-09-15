@@ -8,15 +8,7 @@ from pathlib import Path
 from app.services.tts.wav_trim import compact_wav_silence
 
 
-def _write_tone_silence_tone(path: Path, rate: int = 8000) -> None:
-    tone = int(rate * 0.4)
-    silence = int(rate * 0.9)
-    samples: list[int] = []
-    for index in range(tone):
-        samples.append(int(12000 * math.sin(2 * math.pi * 440 * index / rate)))
-    samples.extend([0] * silence)
-    for index in range(tone):
-        samples.append(int(12000 * math.sin(2 * math.pi * 440 * index / rate)))
+def _write_wav(path: Path, samples: list[int], rate: int = 8000) -> None:
     raw = struct.pack("<" + "h" * len(samples), *samples)
     with wave.open(str(path), "wb") as handle:
         handle.setnchannels(1)
@@ -25,14 +17,37 @@ def _write_tone_silence_tone(path: Path, rate: int = 8000) -> None:
         handle.writeframes(raw)
 
 
-def test_compact_wav_silence_collapses_long_gap(tmp_path: Path) -> None:
-    dest = tmp_path / "gap.wav"
-    _write_tone_silence_tone(dest)
-    with wave.open(str(dest), "rb") as handle:
-        before = handle.getnframes() / float(handle.getframerate())
+def _tone(rate: int, seconds: float, freq: float = 440.0) -> list[int]:
+    count = int(rate * seconds)
+    return [int(12000 * math.sin(2 * math.pi * freq * index / rate)) for index in range(count)]
+
+
+def _duration(path: Path) -> float:
+    with wave.open(str(path), "rb") as handle:
+        return handle.getnframes() / float(handle.getframerate())
+
+
+def test_compact_wav_silence_trims_trailing(tmp_path: Path) -> None:
+    dest = tmp_path / "tail.wav"
+    rate = 8000
+    samples = _tone(rate, 0.4) + [0] * int(rate * 1.6)
+    _write_wav(dest, samples, rate)
+    before = _duration(dest)
     compact_wav_silence(dest)
-    with wave.open(str(dest), "rb") as handle:
-        after = handle.getnframes() / float(handle.getframerate())
-    assert before > 1.6
-    assert after < before - 0.5
-    assert after > 0.7
+    after = _duration(dest)
+    assert before > 1.8
+    assert after < 0.7
+    assert after > 0.35
+
+
+def test_compact_wav_silence_keeps_internal_pause(tmp_path: Path) -> None:
+    dest = tmp_path / "pause.wav"
+    rate = 8000
+    samples = _tone(rate, 0.35) + [0] * int(rate * 0.45) + _tone(rate, 0.35, 520)
+    _write_wav(dest, samples, rate)
+    before = _duration(dest)
+    compact_wav_silence(dest)
+    after = _duration(dest)
+    # Mid-sentence pause must remain so captions stay on the spoken clock.
+    assert after > before - 0.2
+    assert after > 1.0
