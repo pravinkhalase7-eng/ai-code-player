@@ -39,6 +39,8 @@ pipeline {
     WEB_IMAGE_LATEST     = 'ai-coder-web:latest'
     RUNNER_IMAGE         = "ai-coder-runner:${env.BUILD_NUMBER}"
     RUNNER_IMAGE_LATEST  = 'ai-coder-runner:latest'
+    NGINX_IMAGE          = "aicoder-nginx:${env.BUILD_NUMBER}"
+    NGINX_IMAGE_LATEST   = 'aicoder-nginx:latest'
     COMPOSE_PROJECT_NAME = 'aicoder'
     API_HOST_PORT        = '8010'
     WEB_HOST_PORT        = '3010'
@@ -69,6 +71,10 @@ pipeline {
           test -f ai-code-player.env.example || { echo "ERROR: ai-code-player.env.example missing"; exit 1; }
           test -f scripts/install_host_nginx.sh || { echo "ERROR: scripts/install_host_nginx.sh missing"; exit 1; }
           test -f deploy/nginx.conf || { echo "ERROR: deploy/nginx.conf missing"; exit 1; }
+          test -f deploy/nginx/Dockerfile || { echo "ERROR: deploy/nginx/Dockerfile missing"; exit 1; }
+          test -f deploy/nginx/default.conf || { echo "ERROR: deploy/nginx/default.conf missing"; exit 1; }
+          test -f deploy/nginx/https.conf.template || { echo "ERROR: deploy/nginx/https.conf.template missing"; exit 1; }
+          test -f deploy/nginx/40-https.sh || { echo "ERROR: deploy/nginx/40-https.sh missing"; exit 1; }
           test -f deploy/edge.d/00-http.conf || { echo "ERROR: deploy/edge.d/00-http.conf missing"; exit 1; }
           test -f deploy/edge-https.conf.template || { echo "ERROR: deploy/edge-https.conf.template missing"; exit 1; }
           test -f deploy/host-nginx-aicoder.conf || { echo "ERROR: deploy/host-nginx-aicoder.conf missing"; exit 1; }
@@ -181,7 +187,7 @@ pipeline {
           echo "=== Stop previous AI Coding Tutor containers ==="
           docker compose -f docker-compose.yml down --remove-orphans || true
           docker rm -f aicoder-backend-1 aicoder-frontend-1 aicoder-postgres-1 aicoder-redis-1 aicoder-code-runner-1 aicoder-worker-1 aicoder-nginx-1 aicoder-edge-1 2>/dev/null || true
-          docker rmi -f ai-coder-api:latest ai-coder-web:latest ai-coder-runner:latest 2>/dev/null || true
+          docker rmi -f ai-coder-api:latest ai-coder-web:latest ai-coder-runner:latest aicoder-nginx:latest 2>/dev/null || true
         '''
       }
     }
@@ -202,7 +208,10 @@ pipeline {
             -t ${WEB_IMAGE} -t ${WEB_IMAGE_LATEST} \
             ./frontend
 
-          docker images | grep ai-coder | head -n 20 || docker images | head -n 12
+          echo "Building nginx image..."
+          docker build -t ${NGINX_IMAGE} -t ${NGINX_IMAGE_LATEST} ./deploy/nginx
+
+          docker images | grep -E 'ai-coder|aicoder-nginx' | head -n 20 || docker images | head -n 12
         '''
       }
     }
@@ -244,6 +253,7 @@ pipeline {
           export REDIS_HOST_PORT="${REDIS_HOST_PORT:-6380}"
           export NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-80}"
           export NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-443}"
+          export NGINX_SERVER_NAME="play.doxstation.com"
 
           echo "Publishing UI ${WEB_HOST_PORT} API ${API_HOST_PORT} nginx ${NGINX_HTTP_PORT}/${NGINX_HTTPS_PORT}"
           docker compose -f docker-compose.yml down --remove-orphans || true
@@ -309,7 +319,9 @@ pipeline {
             docker compose -f docker-compose.yml logs frontend --tail=40 || true
           fi
           echo "=== Public nginx ==="
-          docker compose -f docker-compose.yml exec -T frontend wget -qO- http://nginx/ >/tmp/aicoder_nginx.html 2>/dev/null || true
+          docker compose -f docker-compose.yml exec -T nginx wget -qO- http://127.0.0.1/ >/tmp/aicoder_nginx.html 2>/dev/null \
+            || docker compose -f docker-compose.yml exec -T frontend wget -qO- http://nginx/ >/tmp/aicoder_nginx.html 2>/dev/null \
+            || true
           if [ -s /tmp/aicoder_nginx.html ]; then
             echo "nginx_ok bytes=$(wc -c </tmp/aicoder_nginx.html)"
           else
@@ -330,6 +342,7 @@ pipeline {
           echo "=== Docker nginx on :80/:443 for play.doxstation.com ==="
           export PUBLIC_APP_URL="${PUBLIC_APP_URL:-https://play.doxstation.com}"
           export PUBLIC_HOST="${PUBLIC_APP_URL}"
+          export NGINX_SERVER_NAME="play.doxstation.com"
           bash scripts/install_host_nginx.sh
         '''
       }

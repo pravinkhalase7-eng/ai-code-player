@@ -135,15 +135,20 @@ services:
     environment:
       API_ORIGIN: http://backend:8000
 
-  # HTTP vhost: deploy/nginx.conf (copied into deploy/edge.d/00-http.conf on deploy).
+  # Public :80/:443. Config is baked into the image — Jenkins docker.sock cannot
+  # bind-mount ./deploy/edge.d from the Jenkins workspace path on the host.
   nginx:
-    image: nginx:1.27-alpine
+    build:
+      context: ./deploy/nginx
+      dockerfile: Dockerfile
+    image: aicoder-nginx:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    environment:
+      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-play.doxstation.com}
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
       - "${NGINX_HTTPS_PORT:-443}:443"
     volumes:
-      - ./deploy/edge.d:/etc/nginx/conf.d:ro
       - /var/www/html:/var/www/html:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
@@ -154,6 +159,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 8
+      start_period: 10s
 
 volumes:
   postgres_data:

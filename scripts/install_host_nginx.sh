@@ -15,15 +15,13 @@ DOMAIN="${DOMAIN%%:*}"
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-aicoder}"
+export NGINX_SERVER_NAME="${DOMAIN}"
 
-HTTP_CONF="${ROOT_DIR}/deploy/edge.d/00-http.conf"
-HTTPS_TEMPLATE="${ROOT_DIR}/deploy/edge-https.conf.template"
-HTTPS_CONF="${ROOT_DIR}/deploy/edge.d/10-https.conf"
 HOST_HTTP_TEMPLATE="${ROOT_DIR}/deploy/host-nginx-aicoder.http.conf"
 HOST_HTTPS_TEMPLATE="${ROOT_DIR}/deploy/host-nginx-aicoder.conf"
 
-if [ ! -f "$HTTP_CONF" ] || [ ! -f "$HTTPS_TEMPLATE" ]; then
-  echo "Missing Docker nginx templates under deploy/"
+if [ ! -f "${ROOT_DIR}/deploy/nginx/Dockerfile" ] || [ ! -f "${ROOT_DIR}/deploy/nginx/default.conf" ]; then
+  echo "Missing baked nginx image files under deploy/nginx/"
   exit 1
 fi
 
@@ -39,12 +37,9 @@ cert_exists() {
     sh -c "test -f /etc/letsencrypt/live/${DOMAIN}/fullchain.pem && test -f /etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 }
 
-write_https_conf() {
-  sed "s/__DOMAIN__/${DOMAIN}/g" "$HTTPS_TEMPLATE" > "$HTTPS_CONF"
-}
-
-remove_https_conf() {
-  rm -f "$HTTPS_CONF"
+nginx_answers() {
+  docker compose -f "$COMPOSE_FILE" exec -T nginx wget -qO- http://127.0.0.1/ >/dev/null 2>&1 \
+    || docker compose -f "$COMPOSE_FILE" exec -T frontend wget -qO- http://nginx/ >/dev/null 2>&1
 }
 
 reload_nginx() {
@@ -53,11 +48,10 @@ reload_nginx() {
 
 start_nginx() {
   echo "Starting Docker nginx on host :80/:443 → play.doxstation.com (${DOMAIN})"
-  cp -f "${ROOT_DIR}/deploy/nginx.conf" "$HTTP_CONF"
-  docker compose -f "$COMPOSE_FILE" up -d nginx
+  docker compose -f "$COMPOSE_FILE" up -d --build --force-recreate --no-deps nginx
   i=1
   while [ "$i" -le 20 ]; do
-    if docker compose -f "$COMPOSE_FILE" exec -T frontend wget -qO- http://nginx/ >/dev/null 2>&1; then
+    if nginx_answers; then
       echo "nginx is serving HTTP on :80"
       return 0
     fi
@@ -124,19 +118,20 @@ try_host_nginx_copy() {
   rm -f "$rendered"
 }
 
-if cert_exists; then
-  write_https_conf
-else
-  remove_https_conf
-fi
-
 start_nginx
 try_host_nginx_copy || true
 
 if issue_cert_if_needed && cert_exists; then
-  write_https_conf
-  docker compose -f "$COMPOSE_FILE" up -d nginx
-  reload_nginx || docker compose -f "$COMPOSE_FILE" restart nginx
+  docker compose -f "$COMPOSE_FILE" up -d --force-recreate --no-deps nginx
+  i=1
+  while [ "$i" -le 10 ]; do
+    if nginx_answers; then
+      break
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
+  reload_nginx || true
   echo "nginx ready: https://${DOMAIN} and http://${DOMAIN} → frontend:3000"
 else
   echo "nginx ready: http://${DOMAIN} → frontend:3000 (same app as :3010)"
