@@ -26,4 +26,5 @@ public/audio/
 public/assets/
 *.log
 .remotion
+deploy/edge.d/10-https.conf
 frontend/out/

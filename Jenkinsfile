@@ -66,6 +66,8 @@ pipeline {
           test -f scripts/normalize_deploy_env.py || { echo "ERROR: normalize_deploy_env.py missing"; exit 1; }
           test -f ai-code-player.env.example || { echo "ERROR: ai-code-player.env.example missing"; exit 1; }
           test -f scripts/install_host_nginx.sh || { echo "ERROR: scripts/install_host_nginx.sh missing"; exit 1; }
+          test -f deploy/edge.d/00-http.conf || { echo "ERROR: deploy/edge.d/00-http.conf missing"; exit 1; }
+          test -f deploy/edge-https.conf.template || { echo "ERROR: deploy/edge-https.conf.template missing"; exit 1; }
           test -f deploy/host-nginx-aicoder.conf || { echo "ERROR: deploy/host-nginx-aicoder.conf missing"; exit 1; }
           test -f deploy/host-nginx-aicoder.http.conf || { echo "ERROR: deploy/host-nginx-aicoder.http.conf missing"; exit 1; }
         '''
@@ -175,7 +177,7 @@ pipeline {
           set +e
           echo "=== Stop previous AI Coding Tutor containers ==="
           docker compose -f docker-compose.yml down --remove-orphans || true
-          docker rm -f aicoder-backend-1 aicoder-frontend-1 aicoder-postgres-1 aicoder-redis-1 aicoder-code-runner-1 aicoder-worker-1 2>/dev/null || true
+          docker rm -f aicoder-backend-1 aicoder-frontend-1 aicoder-postgres-1 aicoder-redis-1 aicoder-code-runner-1 aicoder-worker-1 aicoder-edge-1 2>/dev/null || true
           docker rmi -f ai-coder-api:latest ai-coder-web:latest ai-coder-runner:latest 2>/dev/null || true
         '''
       }
@@ -312,10 +314,10 @@ pipeline {
       steps {
         sh '''
           set -e
-          echo "=== Install host nginx from git (doc-vault style) ==="
+          echo "=== Public edge nginx on :80/:443 (same app as :3010) ==="
           export PUBLIC_APP_URL="${PUBLIC_APP_URL:-https://play.doxstation.com}"
           export PUBLIC_HOST="${PUBLIC_APP_URL}"
-          bash scripts/install_host_nginx.sh || echo "WARN: could not update /etc/nginx/sites-available/aicoder from git"
+          bash scripts/install_host_nginx.sh
         '''
       }
     }
@@ -326,7 +328,8 @@ pipeline {
       echo "AI Coding Tutor ${params.DEPLOY_ENV} build #${env.BUILD_NUMBER} succeeded"
       echo "UI: ${params.PUBLIC_APP_URL}"
       echo "API: host port ${env.API_HOST_PORT} /api/v1/health"
-      echo "HTTPS: ${params.PUBLIC_APP_URL} (host nginx from deploy/host-nginx-aicoder.conf)"
+      echo "HTTP:  http://play.doxstation.com  (Docker edge :80 → frontend)"
+      echo "HTTPS: ${params.PUBLIC_APP_URL} (Docker edge :443 after Let's Encrypt)"
     }
     failure {
       echo "AI Coding Tutor build #${env.BUILD_NUMBER} failed — check stage logs"
