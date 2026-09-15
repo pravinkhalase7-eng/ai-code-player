@@ -50,3 +50,24 @@ Direct UI (always): `http://play.doxstation.com:3010/`
 - Jenkins uses host **8080**, so nginx must not bind 8080.
 - If certbot still times out, allow 80/443 on the Hostinger/cloud firewall, then rebuild.
 - `aicoder-nginx` uses `host.docker.internal` (compose `extra_hosts: host-gateway`) to reach AI Teacher.
+- **Padlock / “connection is secure”** only appears on **https://**. `http://doxstation.com` will always show “Not secure”.
+- Visiting `https://doxstation.com` before an apex cert exists fails: Docker serves the **play.doxstation.com** cert on :443, which does not match the apex name.
+
+### Issue TLS for apex (padlock on doxstation.com)
+
+```bash
+# On VPS — HTTP-01 via existing aicoder nginx :80 ACME location
+docker run --rm \
+  -v /etc/letsencrypt:/etc/letsencrypt \
+  -v /var/lib/letsencrypt:/var/lib/letsencrypt \
+  -v /var/www/html:/var/www/html \
+  certbot/certbot certonly --webroot -w /var/www/html \
+  -d doxstation.com -d www.doxstation.com \
+  --non-interactive --agree-tos --register-unsafely-without-email
+
+# Rebuild nginx so 40-https.sh loads the apex HTTPS vhost
+cd /path/to/ai-coder   # or re-run AI Coder Jenkins
+docker compose up -d --build --force-recreate --no-deps nginx
+
+curl -fsS https://doxstation.com/api/v1/health
+```

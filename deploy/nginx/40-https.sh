@@ -1,5 +1,5 @@
 #!/bin/sh
-# Enable TLS only when Let's Encrypt files are already on the host volume.
+# Enable TLS when Let's Encrypt files are already on the host volume.
 set -eu
 
 DOMAIN="${NGINX_SERVER_NAME:-play.doxstation.com}"
@@ -18,5 +18,19 @@ if [ -n "$DOMAIN" ] && [ -f "$CERT" ] && [ -f "$KEY" ] && [ -f "$TPL" ]; then
   echo "nginx: HTTPS enabled for ${DOMAIN}"
 else
   rm -f "$OUT"
-  echo "nginx: HTTP only (no cert yet for ${DOMAIN:-unknown})"
+  echo "nginx: HTTP only for play (no cert yet for ${DOMAIN:-unknown})"
+fi
+
+# Apex doxstation.com → AI Teacher (separate cert + vhost).
+AITEACHER_TPL="/etc/nginx/templates-extra/https-aiteacher.conf.template"
+AITEACHER_OUT="/etc/nginx/conf.d/20-https-aiteacher.conf"
+AITEACHER_CERT="/etc/letsencrypt/live/doxstation.com/fullchain.pem"
+AITEACHER_KEY="/etc/letsencrypt/live/doxstation.com/privkey.pem"
+
+if [ -f "$AITEACHER_CERT" ] && [ -f "$AITEACHER_KEY" ] && [ -f "$AITEACHER_TPL" ]; then
+  cp "$AITEACHER_TPL" "$AITEACHER_OUT"
+  echo "nginx: HTTPS enabled for doxstation.com (AI Teacher)"
+else
+  rm -f "$AITEACHER_OUT"
+  echo "nginx: HTTP only for doxstation.com (no cert yet)"
 fi
