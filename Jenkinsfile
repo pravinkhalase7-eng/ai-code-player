@@ -45,6 +45,8 @@ pipeline {
     RUNNER_HOST_PORT     = '8090'
     POSTGRES_HOST_PORT   = '5433'
     REDIS_HOST_PORT      = '6380'
+    NGINX_HTTP_PORT      = '80'
+    NGINX_HTTPS_PORT     = '443'
   }
 
   stages {
@@ -66,6 +68,7 @@ pipeline {
           test -f scripts/normalize_deploy_env.py || { echo "ERROR: normalize_deploy_env.py missing"; exit 1; }
           test -f ai-code-player.env.example || { echo "ERROR: ai-code-player.env.example missing"; exit 1; }
           test -f scripts/install_host_nginx.sh || { echo "ERROR: scripts/install_host_nginx.sh missing"; exit 1; }
+          test -f deploy/nginx.conf || { echo "ERROR: deploy/nginx.conf missing"; exit 1; }
           test -f deploy/edge.d/00-http.conf || { echo "ERROR: deploy/edge.d/00-http.conf missing"; exit 1; }
           test -f deploy/edge-https.conf.template || { echo "ERROR: deploy/edge-https.conf.template missing"; exit 1; }
           test -f deploy/host-nginx-aicoder.conf || { echo "ERROR: deploy/host-nginx-aicoder.conf missing"; exit 1; }
@@ -177,7 +180,7 @@ pipeline {
           set +e
           echo "=== Stop previous AI Coding Tutor containers ==="
           docker compose -f docker-compose.yml down --remove-orphans || true
-          docker rm -f aicoder-backend-1 aicoder-frontend-1 aicoder-postgres-1 aicoder-redis-1 aicoder-code-runner-1 aicoder-worker-1 aicoder-edge-1 2>/dev/null || true
+          docker rm -f aicoder-backend-1 aicoder-frontend-1 aicoder-postgres-1 aicoder-redis-1 aicoder-code-runner-1 aicoder-worker-1 aicoder-nginx-1 aicoder-edge-1 2>/dev/null || true
           docker rmi -f ai-coder-api:latest ai-coder-web:latest ai-coder-runner:latest 2>/dev/null || true
         '''
       }
@@ -239,8 +242,10 @@ pipeline {
           export RUNNER_HOST_PORT="${RUNNER_HOST_PORT:-8090}"
           export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5433}"
           export REDIS_HOST_PORT="${REDIS_HOST_PORT:-6380}"
+          export NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-80}"
+          export NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-443}"
 
-          echo "Publishing UI ${WEB_HOST_PORT} API ${API_HOST_PORT}"
+          echo "Publishing UI ${WEB_HOST_PORT} API ${API_HOST_PORT} nginx ${NGINX_HTTP_PORT}/${NGINX_HTTPS_PORT}"
           docker compose -f docker-compose.yml down --remove-orphans || true
 
           echo "Starting Postgres + Redis + sandbox..."
@@ -258,8 +263,8 @@ pipeline {
             sleep 2
           done
 
-          echo "Starting API, worker, frontend (no Kokoro — Google Cloud TTS)..."
-          docker compose -f docker-compose.yml up -d --build backend worker frontend
+          echo "Starting API, worker, frontend, nginx (play.doxstation.com on :80)..."
+          docker compose -f docker-compose.yml up -d --build backend worker frontend nginx
 
           echo "Waiting for API health..."
           i=1
@@ -303,6 +308,14 @@ pipeline {
             echo "WARN: could not fetch web HTML from inside container"
             docker compose -f docker-compose.yml logs frontend --tail=40 || true
           fi
+          echo "=== Public nginx ==="
+          docker compose -f docker-compose.yml exec -T frontend wget -qO- http://nginx/ >/tmp/aicoder_nginx.html 2>/dev/null || true
+          if [ -s /tmp/aicoder_nginx.html ]; then
+            echo "nginx_ok bytes=$(wc -c </tmp/aicoder_nginx.html)"
+          else
+            echo "WARN: nginx did not answer yet — Host Nginx stage will start it"
+            docker compose -f docker-compose.yml logs nginx --tail=40 || true
+          fi
         '''
       }
     }
@@ -314,7 +327,7 @@ pipeline {
       steps {
         sh '''
           set -e
-          echo "=== Public edge nginx on :80/:443 (same app as :3010) ==="
+          echo "=== Docker nginx on :80/:443 for play.doxstation.com ==="
           export PUBLIC_APP_URL="${PUBLIC_APP_URL:-https://play.doxstation.com}"
           export PUBLIC_HOST="${PUBLIC_APP_URL}"
           bash scripts/install_host_nginx.sh
@@ -328,8 +341,8 @@ pipeline {
       echo "AI Coding Tutor ${params.DEPLOY_ENV} build #${env.BUILD_NUMBER} succeeded"
       echo "UI: ${params.PUBLIC_APP_URL}"
       echo "API: host port ${env.API_HOST_PORT} /api/v1/health"
-      echo "HTTP:  http://play.doxstation.com  (Docker edge :80 → frontend)"
-      echo "HTTPS: ${params.PUBLIC_APP_URL} (Docker edge :443 after Let's Encrypt)"
+      echo "HTTP:  http://play.doxstation.com  (Compose nginx :80 → frontend)"
+      echo "HTTPS: ${params.PUBLIC_APP_URL} (Compose nginx :443 after Let's Encrypt)"
     }
     failure {
       echo "AI Coding Tutor build #${env.BUILD_NUMBER} failed — check stage logs"

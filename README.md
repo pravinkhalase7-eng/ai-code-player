@@ -54,7 +54,7 @@ services/code-runner/       Isolated compile/execute sandbox
 frontend/app/               Next.js dashboard + /learn/[lessonId]
 frontend/components/        Player, Monaco workbench, tutor avatar
 frontend/remotion/          Lesson video renderer
-deploy/nginx.conf           Optional reverse proxy
+deploy/nginx.conf           Reverse proxy for play.doxstation.com (:80/:443)
 ```
 
 ## Local development
@@ -179,7 +179,7 @@ Aspect ratio is configurable (`16:9` → 1920×1080, `9:16` → 1080×1920).
 
 1. Fill `.env` with real `DATABASE_URL`, `REDIS_URL`, `GEMINI_API_KEY`, and `KOKORO_URL`.
 2. `docker compose up --build -d`
-3. Optional: `docker compose --profile proxy up -d nginx` and terminate TLS in front of port `8080`.
+3. Compose starts `nginx` on ports 80/443 for https://play.doxstation.com (HTTP works before TLS).
 4. Optional GPU Kokoro: replace the CPU image with `ghcr.io/remsky/kokoro-fastapi-gpu`.
 5. Run `alembic upgrade head` against production Postgres.
 6. Put object storage in front of `STORAGE_PATH` later; the local provider is the default.

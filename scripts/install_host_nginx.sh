@@ -23,12 +23,12 @@ HOST_HTTP_TEMPLATE="${ROOT_DIR}/deploy/host-nginx-aicoder.http.conf"
 HOST_HTTPS_TEMPLATE="${ROOT_DIR}/deploy/host-nginx-aicoder.conf"
 
 if [ ! -f "$HTTP_CONF" ] || [ ! -f "$HTTPS_TEMPLATE" ]; then
-  echo "Missing Docker edge nginx templates under deploy/"
+  echo "Missing Docker nginx templates under deploy/"
   exit 1
 fi
 
 if [ -z "$DOMAIN" ]; then
-  echo "PUBLIC_HOST / PUBLIC_APP_URL empty — skip edge nginx"
+  echo "PUBLIC_HOST / PUBLIC_APP_URL empty — skip nginx"
   exit 0
 fi
 
@@ -47,25 +47,26 @@ remove_https_conf() {
   rm -f "$HTTPS_CONF"
 }
 
-reload_edge() {
-  docker compose -f "$COMPOSE_FILE" exec -T edge nginx -s reload
+reload_nginx() {
+  docker compose -f "$COMPOSE_FILE" exec -T nginx nginx -s reload
 }
 
-start_edge() {
-  echo "Starting Docker edge nginx on host :80/:443 → frontend:3000 (${DOMAIN})"
-  docker compose -f "$COMPOSE_FILE" up -d edge
+start_nginx() {
+  echo "Starting Docker nginx on host :80/:443 → play.doxstation.com (${DOMAIN})"
+  cp -f "${ROOT_DIR}/deploy/nginx.conf" "$HTTP_CONF"
+  docker compose -f "$COMPOSE_FILE" up -d nginx
   i=1
   while [ "$i" -le 20 ]; do
-    if docker compose -f "$COMPOSE_FILE" exec -T frontend wget -qO- http://edge/ >/dev/null 2>&1; then
-      echo "Edge nginx is serving HTTP on :80"
+    if docker compose -f "$COMPOSE_FILE" exec -T frontend wget -qO- http://nginx/ >/dev/null 2>&1; then
+      echo "nginx is serving HTTP on :80"
       return 0
     fi
-    echo "attempt ${i}: edge nginx starting"
+    echo "attempt ${i}: nginx starting"
     i=$((i + 1))
     sleep 1
   done
-  echo "ERROR: edge nginx did not answer on :80"
-  docker compose -f "$COMPOSE_FILE" logs --tail=80 edge || true
+  echo "ERROR: nginx did not answer on :80"
+  docker compose -f "$COMPOSE_FILE" logs --tail=80 nginx || true
   echo "If bind failed, something else owns port 80. :3010 still works."
   return 1
 }
@@ -106,7 +107,7 @@ issue_cert_if_needed() {
   return 0
 }
 
-# Host nginx copy is best-effort (doc-vault). Docker edge is what actually serves :80.
+# Host nginx copy is best-effort (doc-vault). Compose `nginx` is what serves :80.
 try_host_nginx_copy() {
   if [ ! -f "$HOST_HTTP_TEMPLATE" ] || [ ! -f "$HOST_HTTPS_TEMPLATE" ]; then
     return 0
@@ -129,15 +130,15 @@ else
   remove_https_conf
 fi
 
-start_edge
+start_nginx
 try_host_nginx_copy || true
 
 if issue_cert_if_needed && cert_exists; then
   write_https_conf
-  docker compose -f "$COMPOSE_FILE" up -d edge
-  reload_edge || docker compose -f "$COMPOSE_FILE" restart edge
-  echo "Edge nginx ready: https://${DOMAIN} and http://${DOMAIN} → frontend:3000"
+  docker compose -f "$COMPOSE_FILE" up -d nginx
+  reload_nginx || docker compose -f "$COMPOSE_FILE" restart nginx
+  echo "nginx ready: https://${DOMAIN} and http://${DOMAIN} → frontend:3000"
 else
-  echo "Edge nginx ready: http://${DOMAIN} → frontend:3000 (same app as :3010)"
+  echo "nginx ready: http://${DOMAIN} → frontend:3000 (same app as :3010)"
   echo "https://${DOMAIN} needs a Let's Encrypt cert; re-run after :80 is reachable from the internet."
 fi
