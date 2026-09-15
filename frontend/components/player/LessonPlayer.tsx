@@ -21,6 +21,7 @@ import { stripDurationNoise } from "@/lib/reelHeadlines";
 import { buildCues, cueAt } from "@/lib/narrationSync";
 import { measureSpeechEnd } from "@/lib/speechEnvelope";
 import { isTrickyQuizLesson, quizHoldSeconds } from "@/lib/trickyQuiz";
+import { SPOKEN_LANGUAGES } from "@/lib/spokenLanguage";
 import type { ExecutionStep, HighlightRange, Lesson, LessonScene, RunHelp, TutorExpression } from "@/types/lesson";
 
 export function LessonPlayer({
