@@ -7,6 +7,7 @@ Jenkins starts Compose service **nginx** on host **80 / 443** (same firewall pat
 | Type | Name | Value |
 |------|------|-------|
 | A | `play` | `187.127.138.86` |
+| A | `@` (apex `doxstation.com`) | `187.127.138.86` |
 
 Wait until `dig +short play.doxstation.com @8.8.8.8` returns that IP.
 
@@ -25,9 +26,12 @@ Use `ai-code-player.env.example` (upload as Secret file `ai-code-player-env-file
 Build with `PUBLIC_APP_URL=https://play.doxstation.com`. The Deploy stage starts `nginx`, which:
 
 1. Binds host **80** and **443** through Docker
-2. Proxies `/` to the frontend and `/api` `/audio` `/images` to the backend
-3. Serves Let's Encrypt HTTP-01 from `/var/www/html`
-4. Host Nginx stage enables HTTPS when the cert exists
+2. Proxies `play.doxstation.com` `/` → frontend and `/api` `/audio` `/images` → backend
+3. Proxies `doxstation.com` `/` → host `:3000` (AI Teacher web) and `/api` → host `:8000` (AI Teacher API)
+4. Serves Let's Encrypt HTTP-01 from `/var/www/html`
+5. Host Nginx stage enables HTTPS when the cert exists
+
+AI Teacher must keep publishing web on **3000** and API on **8000**. Do **not** start a second nginx on :80 for AI Teacher.
 
 ## 4. Smoke check
 
@@ -35,6 +39,8 @@ Build with `PUBLIC_APP_URL=https://play.doxstation.com`. The Deploy stage starts
 curl -fsS http://play.doxstation.com/ | head
 curl -fsS https://play.doxstation.com/ | head
 curl -fsS https://play.doxstation.com/api/v1/health
+curl -fsS -H 'Host: doxstation.com' http://127.0.0.1/api/v1/health
+curl -fsS http://doxstation.com/api/v1/health
 ```
 
 Direct UI (always): `http://play.doxstation.com:3010/`
@@ -43,3 +49,4 @@ Direct UI (always): `http://play.doxstation.com:3010/`
 
 - Jenkins uses host **8080**, so nginx must not bind 8080.
 - If certbot still times out, allow 80/443 on the Hostinger/cloud firewall, then rebuild.
+- `aicoder-nginx` uses `host.docker.internal` (compose `extra_hosts: host-gateway`) to reach AI Teacher.
