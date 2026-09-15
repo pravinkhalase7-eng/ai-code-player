@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import hashlib
 import html
 import logging
@@ -59,7 +60,7 @@ CODE_LINES = {
 }
 
 _MONO = "Menlo, Consolas, Monaco, ui-monospace, monospace"
-THUMB_VERSION = "cover-v17-real"
+THUMB_VERSION = "tilt-v15-viral"
 
 
 def images_dir() -> Path:
@@ -129,9 +130,7 @@ def thumbnail_prompt(
         f"Create a highly catchy, high-CTR vertical 9:16 thumbnail/poster for a programming video. "
         f"Topic: {topic_clean}. Language: {lang}. Format: {explain}. "
         f'Main headline in huge bold typography: "{headline}". '
-        f'Curiosity hook in a bright contrasting box: "{hook}". '
-        "If this is a coding short, show a real code snippet with ONE teaching line highlighted, "
-        "a red circle on that line, and a play button that says tap to watch the full short. "
+        f'Curiosity hook in a smaller highly contrasting text box: "{hook}". '
         f"Visual: {visual}. "
         "Composition: put the logo/main visual in the upper-middle; put the headline near the center "
         "in huge bold type; put the curiosity hook in a contrasting box; keep important text away "
@@ -508,16 +507,6 @@ def _catchy_hook(topic: str, spoken_language: str | None = None, seed: int = 0) 
     return pick[0], pick[1]
 
 
-def _hero_line_chip(preview: list[str], hero: int) -> str:
-    """Short label from the actual teaching line — never a fake 'SPOT IT' sticker."""
-    if not preview or hero < 0 or hero >= len(preview):
-        return ""
-    line = re.sub(r"\s+", " ", (preview[hero] or "").strip())
-    line = line.replace("{", "").replace("}", "").strip()
-    if len(line) > 28:
-        line = line[:27].rstrip() + "…"
-    return line
-
 def write_explainer_svg_poster(
     dest: Path,
     topic: str,
@@ -824,21 +813,57 @@ def write_svg_poster(
     lang = _normalize_lang(language)
     colors = PALETTES.get(lang, PALETTES["java"])
     headline = strip_duration_copy(title) or strip_duration_copy(topic) or topic or "Coding short"
-    lines = _wrap(headline, 16, 3)
-    seed = int(hashlib.sha256(f"{headline}|{lang}|cover-v17".encode()).hexdigest()[:8], 16)
-
-    # Topic + code sit in the dashboard crop (center of 9:16). No fake clickbait stickers.
-    title_y = 720
-    code_top = 980
-    footer_top = 1720
-    row_h = 54
-    max_rows = 6
-    preview = _preview_lines(lang, code, max_lines=8)
+    lines = _wrap(headline, 18, 3)
+    seed = int(hashlib.sha256(f"{headline}|{lang}".encode()).hexdigest()[:8], 16)
+    title_svg = []
+    y = 430
+    for line in lines:
+        title_svg.append(
+            f'<text x="72" y="{y}" font-size="92" font-family="ui-sans-serif, system-ui, sans-serif" '
+            f'font-weight="800" fill="{colors["ink"]}">{html.escape(line)}</text>'
+        )
+        y += 108
+    subtitle = html.escape(_distinct_subtitle(headline, topic))
+    if subtitle:
+        title_svg.append(
+            f'<text x="72" y="{y + 12}" font-size="36" font-family="ui-sans-serif, system-ui" '
+            f'fill="#a1a1aa">{subtitle}</text>'
+        )
+        y += 56
+    footer_top = 1700
+    # Soft tilt; leave extra air under the headline so the raised corner never covers title text.
+    tilt = -3.2 + ((seed % 9) - 4) * 0.1
+    card_w_est = 936
+    # Approx how far a rotated top corner lifts toward the title.
+    tilt_lift = int(abs(math.sin(math.radians(tilt))) * (card_w_est * 0.55) + 36)
+    code_top = min(max(y + 72 + tilt_lift, 720), 1120)
+    row_h = 46
+    max_rows = max(5, (footer_top - code_top - 120) // row_h)
+    preview = _preview_lines(lang, code, max_lines=max_rows)
     use_diagram = (not preview) or mode in {"explainer", "info"}
+    # Explainers prefer diagram even if stub code leaked in
     if mode in {"explainer", "info"}:
         preview = []
         use_diagram = True
-
+    # Count wrapped display rows so the card is tall enough before drawing.
+    if preview:
+        display_rows = 0
+        for row in preview:
+            display_rows += len(_format_code_rows(row, max_chars=58))
+        # Drop source lines until wrapped rows fit the available vertical band.
+        while preview and (row_h * display_rows + 108) > (footer_top - code_top - 24):
+            preview = preview[:-1]
+            display_rows = sum(len(_format_code_rows(row, max_chars=58)) for row in preview)
+        card_h = row_h * max(display_rows, 1) + 108
+    else:
+        card_h = 520 if use_diagram else 120
+    if code_top + card_h > footer_top:
+        card_h = max(140, footer_top - code_top)
+    card_w = 936
+    cx0 = 72 + card_w / 2
+    cy0 = code_top + card_h / 2
+    code_inner = []
+    # One hero teaching line in accent; every other line the same muted ink.
     hero = 0
     for index, row in enumerate(preview):
         stripped = row.strip()
@@ -849,78 +874,32 @@ def write_svg_poster(
             continue
         hero = index
         break
-    chip = _hero_line_chip(preview, hero)
-
-    title_svg = []
-    y = title_y
-    for line in lines:
-        title_svg.append(
-            f'<text x="72" y="{y}" font-size="76" font-family="ui-sans-serif, system-ui, sans-serif" '
-            f'font-weight="900" fill="{colors["ink"]}">{html.escape(line)}</text>'
-        )
-        y += 86
-    if chip:
-        chip_w = min(900, 64 + len(chip) * 18)
-        title_svg.append(
-            f'<rect x="72" y="{y + 8}" rx="18" width="{chip_w}" height="56" fill="#09090b" '
-            f'stroke="{colors["accent"]}" stroke-width="2"/>'
-            f'<text x="96" y="{y + 46}" font-size="26" font-family="{_MONO}" font-weight="700" '
-            f'fill="{colors["accent"]}">{html.escape(chip)}</text>'
-        )
-        y += 72
-    subtitle = html.escape(_distinct_subtitle(headline, topic))
-    if subtitle:
-        title_svg.append(
-            f'<text x="72" y="{y + 12}" font-size="28" font-family="ui-sans-serif, system-ui" '
-            f'fill="#a1a1aa">{subtitle}</text>'
-        )
-        y += 44
-    code_top = max(980, y + 28)
     if preview:
-        display_rows = 0
-        for row in preview:
-            display_rows += len(_format_code_rows(row, max_chars=42))
-        while preview and display_rows > max_rows:
-            preview = preview[:-1]
-            display_rows = sum(len(_format_code_rows(row, max_chars=42)) for row in preview)
-        card_h = row_h * max(display_rows, 1) + 100
-    else:
-        card_h = 420 if use_diagram else 140
-    if code_top + card_h > footer_top - 40:
-        card_h = max(160, footer_top - 40 - code_top)
-    card_w = 936
-    code_inner = []
-    if preview:
+        # Window chrome
         code_inner.append(
             '<circle cx="40" cy="28" r="8" fill="#fb7185"/><circle cx="68" cy="28" r="8" fill="#fbbf24"/>'
             '<circle cx="96" cy="28" r="8" fill="#34d399"/>'
             f'<text x="130" y="34" font-size="20" font-family="ui-sans-serif, system-ui" fill="#71717a">'
-            f'{html.escape(lang)}</text>'
+            f'{html.escape(lang)}.demo</text>'
         )
-        cy = 82
+        cy = 78
         display_index = 0
         for index, row in enumerate(preview):
-            is_hero = index == hero
-            fill = colors["accent"] if is_hero else "#d4d4d8"
-            for formatted in _format_code_rows(row, max_chars=42):
+            fill = colors["accent"] if index == hero else "#e4e4e7"
+            for formatted in _format_code_rows(row, max_chars=58):
                 display_index += 1
-                if is_hero:
-                    code_inner.append(
-                        f'<rect x="18" y="{cy - 36}" rx="14" width="{card_w - 36}" height="48" '
-                        f'fill="{colors["accent"]}" fill-opacity="0.16"/>'
-                    )
                 code_inner.append(
-                    f'<text x="28" y="{cy}" font-size="20" font-family="{_MONO}" fill="#52525b">'
+                    f'<text x="28" y="{cy}" font-size="18" font-family="{_MONO}" fill="#52525b">'
                     f"{display_index:02d}</text>"
-                    f'<text x="78" y="{cy}" xml:space="preserve" font-size="28" font-family="{_MONO}" '
-                    f'font-weight="{800 if is_hero else 600}" fill="{fill}">{html.escape(formatted)}</text>'
+                    f'<text x="78" y="{cy}" xml:space="preserve" font-size="23" font-family="{_MONO}" '
+                    f'fill="{fill}">{html.escape(formatted)}</text>'
                 )
                 cy += row_h
         panel = (
-            f'<rect x="0" y="0" rx="28" width="{card_w}" height="{card_h}" fill="#09090b" fill-opacity="0.94"/>'
+            f'<rect x="0" y="0" rx="28" width="{card_w}" height="{card_h}" fill="#09090b" fill-opacity="0.92"/>'
             f'<rect x="0" y="0" width="14" height="{card_h}" rx="7" fill="{colors["accent"]}"/>'
             f'<rect x="0" y="0" rx="28" width="{card_w}" height="{card_h}" fill="none" '
-            f'stroke="{colors["accent"]}" stroke-opacity="0.4" stroke-width="2"/>'
+            f'stroke="{colors["glow"]}" stroke-opacity="0.35" stroke-width="2"/>'
             + "".join(code_inner)
         )
     elif use_diagram:
@@ -934,11 +913,13 @@ def write_svg_poster(
             f'<text x="40" y="70" font-size="28" font-family="ui-sans-serif, system-ui" '
             f'fill="#a1a1aa">Explain reel · concept only</text>'
         )
-    play_cy = code_top + card_h / 2
+    # Drop shadow + tilted card group
     code_block = (
+        f'<g transform="translate({cx0:.1f}, {cy0:.1f}) rotate({tilt:.2f}) translate({-cx0:.1f}, {-cy0:.1f})">'
+        f'<rect x="90" y="{code_top + 22}" rx="28" width="{card_w}" height="{card_h}" '
+        f'fill="#000" fill-opacity="0.45"/>'
         f'<g transform="translate(72, {code_top})">{panel}</g>'
-        f'<circle cx="540" cy="{play_cy:.1f}" r="48" fill="#fff" fill-opacity="0.88"/>'
-        f'<polygon points="528,{play_cy - 18:.1f} 528,{play_cy + 18:.1f} 564,{play_cy:.1f}" fill="#18181b"/>'
+        f"</g>"
     )
     dest.write_text(
         f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
@@ -949,14 +930,15 @@ def write_svg_poster(
     </linearGradient>
   </defs>
   <rect width="1080" height="1920" fill="url(#bg)"/>
-  <circle cx="{900 + (seed % 40)}" cy="{160 + (seed % 50)}" r="{220 + (seed % 80)}" fill="{colors["glow"]}" fill-opacity="0.16"/>
-  <circle cx="120" cy="1680" r="{280 + (seed % 60)}" fill="{colors["accent"]}" fill-opacity="0.12"/>
+  <circle cx="{900 + (seed % 40)}" cy="{160 + (seed % 50)}" r="{220 + (seed % 80)}" fill="{colors["glow"]}" fill-opacity="0.18"/>
+  <circle cx="{120}" cy="{1680}" r="{280 + (seed % 60)}" fill="{colors["accent"]}" fill-opacity="0.12"/>
   <rect x="72" y="96" rx="28" width="360" height="72" fill="#fff"/>
   <text x="252" y="144" text-anchor="middle" font-size="28" font-family="ui-sans-serif, system-ui" font-weight="800" fill="#18181b">TECHSHALA</text>
-  <text x="72" y="240" font-size="26" font-family="ui-sans-serif, system-ui" letter-spacing="8" fill="{colors["accent"]}">{html.escape(lang.upper())}</text>
-  {"".join(title_svg)}
+  <text x="72" y="240" font-size="26" font-family="ui-sans-serif, system-ui" letter-spacing="8" fill="{colors["accent"]}">{html.escape((mode.upper() if mode in {"explainer", "info"} else lang.upper()))}</text>
   {code_block}
-  <text x="72" y="1820" font-size="24" font-family="ui-sans-serif, system-ui" letter-spacing="4" fill="#a1a1aa">@techshalabypavi</text>
+  {"".join(title_svg)}
+  <text x="72" y="1760" font-size="30" font-family="ui-sans-serif, system-ui" fill="{colors["accent"]}">@{html.escape("techshalabypavi")}</text>
+  <text x="72" y="1820" font-size="24" font-family="ui-sans-serif, system-ui" letter-spacing="4" fill="#a1a1aa">TECHSHALA BY PAVI</text>
 </svg>
 """,
         encoding="utf-8",

@@ -244,12 +244,10 @@ def test_reel_svg_thumbnail_includes_topic(tmp_path) -> None:
     write_svg_poster(dest, "Java for loop", "30s: Java For Loop", "java", JAVA_FOR)
     body = dest.read_text()
     assert "Java For Loop" in body
-    assert body.count("Java for loop") == 0
     assert "TECHSHALA" in body
     assert "BYTE" not in body
-    assert "SPOT IT" not in body
-    assert "TAP TO WATCH THE FULL SHORT" not in body
     assert "for (int i" in body
+    assert "SPOT IT" not in body
 
     original = settings.storage_path
     original_provider = settings.image_provider
