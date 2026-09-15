@@ -10,6 +10,7 @@ from app.schemas.lesson import (
     LessonFormat,
     LessonLevel,
     ReelSceneScript,
+    normalize_reel_mode,
     normalize_reel_seconds,
 )
 from app.services.locale import normalize_spoken_language
@@ -45,12 +46,7 @@ class LessonCreateRequest(BaseModel):
     @field_validator("reel_mode")
     @classmethod
     def _reel_mode(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = str(value).strip().lower()
-        if cleaned not in {"code", "info", "explainer"}:
-            raise ValueError('reel_mode must be "code", "info", "explainer", or null')
-        return cleaned
+        return normalize_reel_mode(value)
 
 
 class LessonCreateResponse(BaseModel):

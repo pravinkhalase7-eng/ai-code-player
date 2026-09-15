@@ -8,6 +8,7 @@ import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
 import { isPosterScene, reelCta } from "@/lib/reelCta";
 import { isExplainMotionLesson, lessonExplainedTopics, synthesizeBoardSteps } from "@/lib/explainerVisuals";
 import { infoBulletAt } from "@/lib/infoReelAnim";
+import { QUIZ_LETTERS, isTrickyQuizLesson, trickyQuizState } from "@/lib/trickyQuiz";
 import { sliceAudioBuffer, speechBounds } from "@/lib/speechEnvelope";
 
 const WIDTH = 720;
@@ -1187,6 +1188,90 @@ function drawSummaryRecap(
 }
 
 
+function drawQuizPanel(
+  ctx: CanvasRenderingContext2D,
+  lesson: Lesson,
+  scene: LessonScene,
+  elapsed: number,
+  duration: number,
+) {
+  const state = trickyQuizState(lesson, scene, elapsed, duration);
+  if (!state) return;
+  const x = 28;
+  const w = WIDTH - 108;
+  const optionH = 46;
+  const optionGap = 8;
+  const optionsBlock = state.options.length * (optionH + optionGap);
+  const questionY = 328;
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 22px ui-sans-serif, system-ui";
+  wrapLines(ctx, state.question, WIDTH - 140, 2).forEach((line, index) => {
+    ctx.fillText(line, WIDTH / 2, questionY + index * 28);
+  });
+  ctx.textAlign = "left";
+
+  const ideTop = 380;
+  const ideH = Math.min(390, HEIGHT - ideTop - optionsBlock - 70);
+  drawIdeWindow(ctx, x, ideTop, w, ideH, state.quiz.filename || "main.js", state.code, null);
+
+  if (state.phase === "countdown") {
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    roundRect(ctx, x, ideTop, w, ideH, 22);
+    ctx.fill();
+    const cx = x + w / 2;
+    const cy = ideTop + ideH / 2;
+    const r = 58;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 10, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,255,255,0.16)";
+    ctx.lineWidth = 8;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,255,255,0.22)";
+    ctx.lineWidth = 7;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * state.ring);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 7;
+    ctx.lineCap = "round";
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "800 54px ui-sans-serif, system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText(String(state.count), cx, cy + 18);
+    ctx.textAlign = "left";
+  }
+
+  const optionsTop = ideTop + ideH + 16;
+  state.options.forEach((option, index) => {
+    const oy = optionsTop + index * (optionH + optionGap);
+    const correct = state.phase === "reveal" && index === state.answerIndex;
+    const wrong = state.phase === "reveal" && index !== state.answerIndex;
+    roundRect(ctx, x, oy, w, optionH, 14);
+    ctx.fillStyle = correct ? "rgba(16,185,129,0.28)" : wrong ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.08)";
+    ctx.fill();
+    ctx.strokeStyle = correct ? "rgba(110,231,183,0.55)" : "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + 24, oy + optionH / 2, 12, 0, Math.PI * 2);
+    ctx.fillStyle = correct ? "#34d399" : "rgba(255,255,255,0.12)";
+    ctx.fill();
+    ctx.fillStyle = correct ? "#052e16" : "#e4e4e7";
+    ctx.font = "800 12px ui-sans-serif, system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText(QUIZ_LETTERS[index] || String(index + 1), x + 24, oy + optionH / 2 + 4);
+    ctx.textAlign = "left";
+    ctx.fillStyle = wrong ? "#71717a" : "#f4f4f5";
+    ctx.font = "700 16px ui-sans-serif, system-ui";
+    ctx.fillText(option, x + 46, oy + optionH / 2 + 6);
+  });
+}
+
+
 function drawFrame(
   ctx: CanvasRenderingContext2D,
   lesson: Lesson,
@@ -1200,7 +1285,8 @@ function drawFrame(
   watermark: HTMLCanvasElement | null,
 ) {
   const explainMotion = isExplainMotionLesson(lesson);
-  const poster = isPosterScene(scene.type) && !explainMotion;
+  const quizLesson = isTrickyQuizLesson(lesson);
+  const poster = isPosterScene(scene.type) && !explainMotion && !quizLesson;
   if (poster) {
     if (!drawCoverImage(ctx, thumb)) drawStudioBackground(ctx);
   } else {
@@ -1261,6 +1347,8 @@ function drawFrame(
       });
     }
     ctx.textAlign = "left";
+  } else if (quizLesson) {
+    drawQuizPanel(ctx, lesson, scene, elapsed, duration);
   } else if (
     scene.type === "concept" ||
     explainMotion ||

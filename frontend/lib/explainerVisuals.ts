@@ -5,6 +5,7 @@ import type { Lesson, LessonScene } from "@/types/lesson";
 export type BoardStep = { title: string; detail: string; example: string };
 
 export function isExplainMotionLesson(lesson: Lesson): boolean {
+  if (lesson.reel_mode === "quiz") return false;
   if (lesson.reel_mode === "explainer" || lesson.reel_mode === "info") return true;
   if (lesson.reel_mode === "code") return false;
   return lesson.requires_code === false;

@@ -368,3 +368,56 @@ def test_ensure_runnable_renames_java_class_to_main() -> None:
     wrapped = ensure_runnable("java", snippet)
     assert "public class Main" in wrapped
     assert "System.out.println(2);" in wrapped
+
+
+def test_quiz_reel_accepts_timer_format() -> None:
+    payload = {
+        "lesson_id": "js-in-operator",
+        "title": "The in operator trick",
+        "language": "javascript",
+        "level": "beginner",
+        "format": "reel",
+        "reel_mode": "quiz",
+        "requires_code": True,
+        "topic": "tricky quiz: what does this print",
+        "objectives": ["Spot the prototype trap", "Pick the right output"],
+        "scenes": [
+            {"id": "hook", "type": "intro", "duration": 5, "narration": "Most people miss this one."},
+            {
+                "id": "quiz",
+                "type": "quiz",
+                "duration": 9,
+                "kind": "predict_output",
+                "question": "What does this log?",
+                "code": 'class Lamp {\n  turnOn() { return "bright"; }\n}\nconst lamp = new Lamp();\nconsole.log("turnOn" in lamp);',
+                "options": ["false", "true", "Error", "undefined"],
+                "answer": 1,
+                "explanation": "in walks the prototype chain, so turnOn is found.",
+                "narration": "Look close. Comment A, B, C, or D.",
+            },
+            {
+                "id": "end",
+                "type": "summary",
+                "duration": 10,
+                "narration": "It's B, true, because methods live on the prototype.",
+                "takeaways": ["in checks the prototype", "Comment if you got it"],
+            },
+        ],
+    }
+    lesson = Lesson.model_validate(payload)
+    assert lesson.reel_mode == "quiz"
+    quiz = next(scene for scene in lesson.scenes if scene.type == "quiz")
+    assert quiz.options[int(quiz.answer)] == "true"
+    incomplete = {
+        **payload,
+        "scenes": [
+            payload["scenes"][0],
+            {**payload["scenes"][1], "options": [], "answer": 0},
+            payload["scenes"][2],
+        ],
+    }
+    repaired = lesson_from_draft(LessonDraft.model_validate(incomplete))
+    assert repaired.reel_mode == "quiz"
+    fixed_quiz = next(scene for scene in repaired.scenes if scene.type == "quiz")
+    assert len(fixed_quiz.options) >= 2
+    assert isinstance(fixed_quiz.answer, int)

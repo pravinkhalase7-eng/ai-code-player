@@ -20,7 +20,7 @@ import { firstMeaningfulHighlight } from "@/lib/codeFocus";
 import { stripDurationNoise } from "@/lib/reelHeadlines";
 import { buildCues, cueAt } from "@/lib/narrationSync";
 import { measureSpeechEnd } from "@/lib/speechEnvelope";
-import { SPOKEN_LANGUAGES } from "@/lib/spokenLanguage";
+import { isTrickyQuizLesson, quizHoldSeconds } from "@/lib/trickyQuiz";
 import type { ExecutionStep, HighlightRange, Lesson, LessonScene, RunHelp, TutorExpression } from "@/types/lesson";
 
 export function LessonPlayer({
@@ -213,10 +213,14 @@ export function LessonPlayer({
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return undefined;
-    const onEnded = () => advanceScene();
+    const onEnded = () => {
+      const current = scenes[indexRef.current];
+      if (isTrickyQuizLesson(lesson) && current?.type === "quiz") return;
+      advanceScene();
+    };
     el.addEventListener("ended", onEnded);
     return () => el.removeEventListener("ended", onEnded);
-  }, [scenes]);
+  }, [scenes, lesson.reel_mode]);
 
   function startVoice() {
     setNeedsGesture(false);
@@ -329,21 +333,30 @@ export function LessonPlayer({
     let advanced = false;
     const tick = () => {
       const audio = audioRef.current;
+      const quizHold =
+        isTrickyQuizLesson(lesson) && scene.type === "quiz" ? quizHoldSeconds(scene) : 0;
       if (audio && Number.isFinite(audio.duration) && audio.duration > 0.4) {
         const measured = clipDurationRef.current;
         const segEnds = (scene.segments || []).map((s) => Number(s.end) || 0);
         const lastSegEnd = segEnds.length ? Math.max(...segEnds) : 0;
         if (measured > 0.4) {
           lockedDuration = Math.min(measured, audio.duration);
-        } else if (lastSegEnd > 1 && audio.duration > lastSegEnd + 1.2) {
+          if (quizHold) lockedDuration = Math.max(lockedDuration, quizHold);
+        } else if (lastSegEnd > 1 && audio.duration > lastSegEnd + 1.2 && !quizHold) {
           // Prefer cue clocks over Chirp's long trailing pad.
           lockedDuration = lastSegEnd + 0.35;
         } else {
-          lockedDuration = audio.duration;
+          lockedDuration = Math.max(audio.duration, quizHold);
         }
         if (Math.abs(measured - lockedDuration) > 0.05) {
           clipDurationRef.current = lockedDuration;
           setClipDuration(lockedDuration);
+        }
+      } else if (quizHold) {
+        lockedDuration = quizHold;
+        if (Math.abs(clipDurationRef.current - quizHold) > 0.05) {
+          clipDurationRef.current = quizHold;
+          setClipDuration(quizHold);
         }
       }
       const cues = buildCues(scene, lockedDuration);
@@ -351,6 +364,8 @@ export function LessonPlayer({
       // Prefer real WAV clock whenever audio has advanced — wall-clock drift breaks karaoke.
       if (
         audio &&
+        !audio.ended &&
+        !audio.paused &&
         Number.isFinite(audio.currentTime) &&
         audio.readyState >= 2 &&
         (audio.currentTime > 0.02 || !audio.paused)
@@ -384,7 +399,7 @@ export function LessonPlayer({
     };
     frame = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frame);
-  }, [playing, scene, rate, index, manualStepping, syncEpoch]);
+  }, [playing, scene, rate, index, manualStepping, syncEpoch, lesson.reel_mode]);
 
   useEffect(() => {
     const percent = scenes.length ? ((index + 1) / scenes.length) * 100 : 0;
@@ -760,7 +775,9 @@ export function LessonPlayer({
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-[0.25em] text-amber-200/80 sm:text-sm">
             {isReel
-              ? lesson.reel_mode === "explainer"
+              ? lesson.reel_mode === "quiz"
+                ? `${spokenLabel} · Tricky quiz · ${lesson.topic}`
+                : lesson.reel_mode === "explainer"
                 ? `${spokenLabel} · Explainer · ${lesson.topic}`
                 : lesson.requires_code === false
                   ? `${spokenLabel} · Explain · ${lesson.topic}`
@@ -1055,6 +1072,7 @@ function scriptLinesFrom(lesson: Lesson): ScriptLine[] {
 
 function isExplainLesson(lesson: Lesson): boolean {
   // Explicit Code short must never be treated as Info reel.
+  if (lesson.reel_mode === "quiz") return false;
   if (lesson.requires_code === true && lesson.reel_mode !== "explainer" && lesson.reel_mode !== "info") return false;
   if (lesson.reel_mode === "explainer" || lesson.reel_mode === "info") return true;
   if (lesson.requires_code === false) return true;

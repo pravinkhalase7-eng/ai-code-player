@@ -193,8 +193,93 @@ Hard rules:
 - Spoken style: flowing spoken lines, catchy, not a lecture. No filler.
   Do NOT end every clause with a period. Link related clauses with commas so TTS does not pause between every sentence.
 - Never say "{target} seconds" or "in this short" in narration or titles.
-- spoken_language must match the tutor plan for all spoken lines, bullets, diagram_steps (title/detail; keep code tokens in example), takeaways, and the title.
 - lesson_id should be a short slug.
 - language may stay as requested for metadata, but there is no program.
+""".strip()
+
+
+def default_tricky_quiz(language: str) -> dict:
+    """Phone-readable interview trick used if the planner omits a valid quiz."""
+    lang = (language or "java").strip().lower()
+    if lang in {"javascript", "js", "typescript", "ts"}:
+        return {
+            "question": "What does this log?",
+            "code": (
+                "class Lamp {\n"
+                "  turnOn() {\n"
+                "    return \"bright\";\n"
+                "  }\n"
+                "}\n"
+                "const lamp = new Lamp();\n"
+                'console.log("turnOn" in lamp);'
+            ),
+            "options": ["false", "true", "Error", "undefined"],
+            "answer": 1,
+            "explanation": '"turnOn" in lamp is true because methods live on the prototype, and in checks the chain.',
+            "filename": "main.js",
+        }
+    if lang == "python":
+        return {
+            "question": "What does this print?",
+            "code": "a = [1]\nb = a\nb.append(2)\nprint(a)",
+            "options": ["[1]", "[1, 2]", "Error", "None"],
+            "answer": 1,
+            "explanation": "b = a copies the reference, so append mutates the same list.",
+            "filename": "main.py",
+        }
+    return {
+        "question": "What does this print?",
+        "code": (
+            "public class Main {\n"
+            "    public static void main(String[] args) {\n"
+            "        String a = \"hi\";\n"
+            "        String b = new String(\"hi\");\n"
+            "        System.out.println(a == b);\n"
+            "    }\n"
+            "}"
+        ),
+        "options": ["true", "false", "Error", "null"],
+        "answer": 1,
+        "explanation": "== compares references. new String(\"hi\") is a different object, so this prints false.",
+        "filename": "Main.java",
+    }
+
+
+def tricky_quiz_reel_planner_instruction(seconds: int = 30) -> str:
+    target = normalize_reel_seconds(seconds)
+    words_lo = int(round(target * 2.3))
+    words_hi = int(round(target * 3.0))
+    scale = target / 30.0
+
+    def span(low: float, high: float) -> str:
+        return f"{int(round(low * scale))}-{int(round(high * scale))}s"
+
+    return f"""
+You are the Lesson Planner Agent for a TRICKY QUIZ reel (Instagram / YouTube Shorts interview trap).
+The viewer sees a tiny code snippet, four answers, a countdown timer, THEN the explanation.
+Create a hooky visual short. Total spoken time across ALL scenes MUST be about {target} seconds ({words_lo}-{words_hi} words total).
+Set reel_seconds to {target}. Set requires_code to true. Set reel_mode to "quiz". format must be "reel".
+
+Required scenes IN THIS ORDER: intro, quiz, summary.
+Do NOT include concept, execution, or terminal scenes.
+Do NOT include a separate code scene — put the snippet on quiz.code.
+
+Hard rules:
+- Intro ({span(4, 6)}): Hook with a trap ("Most people get this wrong"). Never open with stop scrolling. Do not reveal the answer.
+- Quiz ({span(8, 12)}): kind must be predict_output or multiple_choice.
+  question: one short line, e.g. "What does this log?"
+  code: a REAL tricky snippet for THIS topic and language. 6-14 lines max. Phone-readable. Complete enough to reason about.
+  options: EXACTLY 4 short choices (true/false, a value, Error, undefined). No long sentences.
+  answer: integer index of the correct option (0-3).
+  explanation: one punchy reason (also duplicated in summary narration).
+  narration: ONLY the prompt, e.g. "Look close. Comment A, B, C, or D." Do NOT count out loud. Do NOT reveal the answer. Keep under 12 words.
+- Summary ({span(8, 14)}): Reveal the correct option first ("It's B, true"), then explain WHY in spoken sentences. 2-3 takeaways. Ask them to comment if they got it.
+- The trick must be a real language gotcha (prototype vs own property, == vs equals, reference vs copy, hoisting, pass-by-value, etc.). Never a toy 1+1 quiz.
+- Spoken style: flowing spoken lines, catchy, not a lecture.
+  Do NOT end every clause with a period. Link related clauses with commas so TTS does not pause between every sentence.
+- Never say "{target} seconds" or "in this short" in narration or titles.
+- spoken_language must match the tutor plan for all spoken lines, question, options, explanation, takeaways, and the title. Keep code tokens in English.
+- lesson_id should be a short slug.
+- language and filename must match (Main.java / main.py / main.js).
 """.strip()
 

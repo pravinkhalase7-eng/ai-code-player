@@ -5,6 +5,7 @@ import { TalkingByteAvatar } from "@/components/tutor/TalkingByteAvatar";
 import { KaraokeCaption } from "@/components/player/Caption";
 import { buildCues, cueAt } from "@/lib/narrationSync";
 import { ReelCodePanel } from "@/components/player/ReelCodePanel";
+import { TrickyQuizOverlay } from "@/components/player/TrickyQuizOverlay";
 import { HashMapBoard } from "@/components/player/HashMapBoard";
 import { MechanismBoard } from "@/components/player/MechanismBoard";
 import type { HashMapVisual } from "@/types/lesson";
@@ -12,6 +13,7 @@ import { boardStateFromSteps } from "@/lib/hashmapPhase";
 import { sourceFilename } from "@/lib/language";
 import { beatHighlight, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
 import { isPosterScene, reelCta } from "@/lib/reelCta";
+import { isTrickyQuizLesson, trickyQuizState } from "@/lib/trickyQuiz";
 import { boardKindLabel, isExplainMotionLesson, lessonExplainedTopicDetails, lessonExplainedTopics, synthesizeBoardSteps } from "@/lib/explainerVisuals";
 import { beatsFromSegments, infoBulletAt, infoBulletAtBeats, playInfoBulletBlip } from "@/lib/infoReelAnim";
 import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
@@ -73,8 +75,13 @@ export function ReelStage({
   const showConsole = running || Boolean(runError || scene.stderr);
   const topic = displayTopic(lesson.topic);
   const explainMotion = isExplainMotionLesson(lesson);
+  const quizLesson = isTrickyQuizLesson(lesson);
+  const quizState = useMemo(
+    () => (quizLesson ? trickyQuizState(lesson, scene, currentTime, duration) : null),
+    [quizLesson, lesson, scene, currentTime, duration],
+  );
   // Code shorts keep static poster intros/summaries; explainer/info always get motion boards.
-  const poster = isPosterScene(scene.type) && !explainMotion;
+  const poster = isPosterScene(scene.type) && !explainMotion && !quizLesson;
   const thumb = lesson.thumbnail_url || "";
   const cta = reelCta(lesson, scene);
   const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
@@ -237,11 +244,32 @@ export function ReelStage({
       <div className="relative z-20 mt-3 flex items-center gap-2 px-1">
         <span className="text-sm font-semibold text-white">{cta.handle}</span>
         <span className="rounded-full bg-amber-400 px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide text-zinc-950">
-          {cta.follow}
-        </span>
-      </div>
+            {cta.follow}
+          </span>
+        </div>
 
-      {poster ? (
+      {quizState ? (
+        <>
+          <div className="relative z-20 mt-2 flex shrink-0 items-center gap-3 px-1">
+            <TalkingByteAvatar
+              speaking={playing}
+              narration={narration}
+              currentTime={currentTime}
+              duration={duration}
+              size="xl"
+            />
+            <KaraokeCaption
+              text={karaokeText}
+              currentTime={currentTime}
+              duration={duration}
+              cueStart={karaokeStart}
+              cueEnd={karaokeEnd}
+              segments={scene.segments}
+            />
+          </div>
+          <TrickyQuizOverlay lesson={lesson} state={quizState} highlight={activeHighlight} />
+        </>
+      ) : poster ? (
         <div className="relative z-10 flex min-h-0 flex-1 flex-col justify-end px-4 pb-2">
           {scene.type === "summary" ? (
             <div className="rounded-2xl border border-white/10 bg-black/70 px-4 py-3 text-center backdrop-blur-md">

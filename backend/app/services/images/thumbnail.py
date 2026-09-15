@@ -91,6 +91,8 @@ def thumbnail_prompt(
 
     if hindi:
         hooks = ["कौन सा?", "वाह!", "रुको!", "ये कैसे?", "सच??"]
+    elif mode == "quiz":
+        hooks = ["90% FAIL THIS", "WHICH ONE?", "WAIT…", "MOST MISS THIS", "A B C OR D?"]
     else:
         hooks = ["WHICH ONE?", "WAIT…", "MOST MISS THIS", "THIS OR THAT?", "WHY?"]
     seed = int(hashlib.sha256(f"{topic_clean}|{lang}|{mode}".encode()).hexdigest()[:8], 16)
@@ -124,7 +126,7 @@ def thumbnail_prompt(
             "large neon concept cards naming the real subtopics from the video title; light trails connecting them"
         )
 
-    explain = "how-it-works explainer" if mode in {"explainer", "info"} else "coding short"
+    explain = "tricky coding quiz" if mode == "quiz" else "how-it-works explainer" if mode in {"explainer", "info"} else "coding short"
 
     return (
         f"Create a highly catchy, high-CTR vertical 9:16 thumbnail/poster for a programming video. "

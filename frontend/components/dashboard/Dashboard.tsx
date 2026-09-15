@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type MouseEvent } from "react";
-import { ArrowRight, Clapperboard, Expand, GitBranch, ImageIcon, Info, RefreshCw, Sparkles, Timer, Trash2, X } from "lucide-react";
+import { ArrowRight, CircleHelp, Clapperboard, Expand, GitBranch, ImageIcon, Info, RefreshCw, Sparkles, Timer, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -145,15 +145,25 @@ export function Dashboard() {
       const apiFormat = format === "lesson" ? "lesson" : "reel";
       if (apiFormat === "reel") storeReelSeconds(reelSeconds);
       const requiresCode =
-        format === "info" || format === "explainer" ? false : format === "reel" ? true : undefined;
+        format === "info" || format === "explainer" ? false : format === "reel" || format === "quiz" ? true : undefined;
       const reelMode =
-        format === "explainer" ? "explainer" : format === "info" ? "info" : format === "reel" ? "code" : undefined;
+        format === "explainer"
+          ? "explainer"
+          : format === "info"
+            ? "info"
+            : format === "quiz"
+              ? "quiz"
+              : format === "reel"
+                ? "code"
+                : undefined;
       const defaultTopic =
         format === "explainer"
           ? "how hashmap works in java"
           : format === "info"
             ? "what is large language model"
-            : "for loop";
+            : format === "quiz"
+              ? "tricky quiz: what does this print"
+              : "for loop";
       const created = await createLesson(
         topic || defaultTopic,
         language,
@@ -233,13 +243,14 @@ export function Dashboard() {
         <p className="mb-4 text-xs text-zinc-500">
           Byte will teach in {SPOKEN_LANGUAGES.find((item) => item.id === spokenLanguage)?.label}.
         </p>
-        <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {(
             [
               { id: "lesson" as const, label: "Full lesson", hint: "Walkthrough, execution, quiz" },
               { id: "reel" as const, label: "Code short", hint: "Hook + runnable program" },
               { id: "info" as const, label: "Info reel", hint: "No program — concepts like LLMs" },
               { id: "explainer" as const, label: "Explainer", hint: "Diagrams + how it works" },
+              { id: "quiz" as const, label: "Tricky quiz", hint: "Timer + MCQ, then explain" },
             ] as const
           ).map((item) => (
             <button
@@ -255,6 +266,9 @@ export function Dashboard() {
                 if (item.id === "explainer" && (!topic.trim() || /for loop/i.test(topic))) {
                   setTopic("how hashmap works in java");
                 }
+                if (item.id === "quiz" && (!topic.trim() || /for loop|hashmap|language model/i.test(topic))) {
+                  setTopic("tricky quiz: what does this print");
+                }
               }}
               className={cn(
                 "rounded-2xl border px-4 py-3 text-left transition",
@@ -263,7 +277,9 @@ export function Dashboard() {
                     ? "border-violet-300/60 bg-violet-400/15 text-white"
                     : item.id === "explainer"
                       ? "border-cyan-300/60 bg-cyan-400/15 text-white"
-                      : "border-amber-300/60 bg-amber-400/15 text-white"
+                      : item.id === "quiz"
+                        ? "border-rose-300/60 bg-rose-400/15 text-white"
+                        : "border-amber-300/60 bg-amber-400/15 text-white"
                   : "border-white/10 bg-white/5 text-zinc-300 hover:border-amber-300/30",
               )}
             >
@@ -274,6 +290,8 @@ export function Dashboard() {
                   <Info className="h-4 w-4 text-violet-300" />
                 ) : item.id === "explainer" ? (
                   <GitBranch className="h-4 w-4 text-cyan-300" />
+                ) : item.id === "quiz" ? (
+                  <CircleHelp className="h-4 w-4 text-rose-300" />
                 ) : (
                   <Sparkles className="h-4 w-4 text-amber-300" />
                 )}
@@ -283,7 +301,7 @@ export function Dashboard() {
             </button>
           ))}
         </div>
-        {format === "reel" || format === "info" || format === "explainer" ? (
+        {format === "reel" || format === "info" || format === "explainer" || format === "quiz" ? (
           <div className="mb-4">
             <p className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
               <Timer className="h-3.5 w-3.5" />
@@ -316,7 +334,7 @@ export function Dashboard() {
         <div className="flex flex-col gap-3 sm:flex-row">
           <Input value={topic} onChange={(event) => setTopic(event.target.value)} />
           <Button onClick={start} disabled={busy} className="min-h-11 w-full sm:w-48">
-            {busy ? "Preparing..." : format === "explainer" ? "Make Explainer" : format === "info" ? "Make Info Reel" : format === "reel" ? "Make a Short" : "Start Learning"}
+            {busy ? "Preparing..." : format === "explainer" ? "Make Explainer" : format === "info" ? "Make Info Reel" : format === "quiz" ? "Make Quiz" : format === "reel" ? "Make a Short" : "Start Learning"}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
@@ -378,7 +396,9 @@ export function Dashboard() {
                           </p>
                           <span className="shrink-0 text-xs uppercase text-amber-200">
                             {lesson.format === "reel"
-                              ? lesson.reel_mode === "explainer"
+                              ? lesson.reel_mode === "quiz"
+                                ? `${lesson.reel_seconds || 30}s Quiz`
+                                : lesson.reel_mode === "explainer"
                                 ? `${lesson.reel_seconds || 30}s Explainer`
                                 : lesson.reel_mode === "info" || lesson.requires_code === false
                                   ? `${lesson.reel_seconds || 30}s Info`

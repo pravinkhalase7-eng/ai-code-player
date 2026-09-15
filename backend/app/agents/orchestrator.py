@@ -20,11 +20,13 @@ from app.schemas.lesson import (
 from app.services.gemini_client import generate_text, structured_generate
 from app.services.locale import hook_narration, needs_localization, pick_reel_hook, spoken_generation_rules, spoken_locale, strip_duration_copy, uses_spoken_script
 from app.agents.topic_mode import (
+    default_hashmap_visual,
+    default_tricky_quiz,
     explain_reel_planner_instruction,
     explainer_reel_planner_instruction,
-    topic_requires_code,
-    default_hashmap_visual,
     topic_is_hashmap,
+    topic_requires_code,
+    tricky_quiz_reel_planner_instruction,
 )
 
 logger = logging.getLogger(__name__)
@@ -375,14 +377,19 @@ def plan_lesson(
         f"Topic: {topic}\nProgramming language: {language}\nRequested level: {level}\nFormat: {fmt}\n"
     )
     mode = (reel_mode or "").strip().lower() or None
-    if mode not in {None, "code", "info", "explainer"}:
+    if mode not in {None, "code", "info", "explainer", "quiz"}:
         mode = None
     if fmt == "reel":
         message += (
             f"This is a {seconds}-second catchy short/reel, not a full lesson. "
             "Keep the plan tight and scale spoken depth to that length."
         )
-        if mode == "explainer":
+        if mode == "quiz":
+            message += (
+                " This is a TRICKY QUIZ reel: requires_code=true, reel_mode=quiz. "
+                "Plan intro, quiz (code + 4 options), and summary explanation. No execution scene."
+            )
+        elif mode == "explainer":
             message += (
                 " This is an EXPLAINER reel: requires_code=false, reel_mode=explainer. "
                 "Do NOT plan a program. Teach HOW it works with intro, concept diagram_steps, and summary only."
@@ -403,7 +410,10 @@ def plan_lesson(
     plan.reel_seconds = seconds
     inferred = topic_requires_code(topic)
     if fmt == "reel":
-        if mode == "explainer":
+        if mode == "quiz":
+            plan.requires_code = True
+            plan.reel_mode = "quiz"
+        elif mode == "explainer":
             plan.requires_code = False
             plan.reel_mode = "explainer"
         elif mode == "code" or requires_code is True:
@@ -448,7 +458,9 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
         f"reel_mode={getattr(plan, 'reel_mode', None)}\n"
     )
     plan_mode = (getattr(plan, "reel_mode", None) or "").strip().lower()
-    if is_reel and plan_mode == "explainer":
+    if is_reel and plan_mode == "quiz":
+        planner = AgentSpec("quiz_reel_planner_agent", tricky_quiz_reel_planner_instruction(seconds), LessonDraft, 0.35)
+    elif is_reel and plan_mode == "explainer":
         planner = AgentSpec("explainer_reel_planner_agent", explainer_reel_planner_instruction(seconds), LessonDraft, 0.35)
     elif is_reel and not plan.requires_code:
         planner = AgentSpec("explain_reel_planner_agent", explain_reel_planner_instruction(seconds), LessonDraft, 0.35)
@@ -495,7 +507,8 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
         for scene in lesson.scenes
     )
     spoken_rules = f"{spoken_generation_rules(plan.spoken_language)}\n{CODE_TEACHING_RULES}"
-    if plan.requires_code and (not has_code or empty_main or stub_code_talk):
+    quiz_reel = is_reel and plan_mode == "quiz"
+    if plan.requires_code and not quiz_reel and (not has_code or empty_main or stub_code_talk):
         lesson = invoke_agent(CODE_AGENT, f"{spoken_rules}\n{lesson.model_dump_json()}")
         assert isinstance(lesson, Lesson)
         lesson.spoken_language = plan.spoken_language
@@ -503,7 +516,7 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
     has_highlights = any(
         getattr(scene, "highlight_ranges", None) for scene in lesson.scenes if scene.type == "code"
     )
-    if plan.requires_code and not has_highlights:
+    if plan.requires_code and not quiz_reel and not has_highlights:
         lesson = invoke_agent(VISUAL_AGENT, f"{spoken_rules}\n{lesson.model_dump_json()}")
         assert isinstance(lesson, Lesson)
         lesson.spoken_language = plan.spoken_language
@@ -588,8 +601,79 @@ def _synth_visual_for_scene(scene, lesson) -> dict:
     }
 
 
+def _normalize_quiz_reel(lesson: Lesson) -> Lesson:
+    from app.schemas.lesson import IntroScene, QuizKind, QuizScene, SummaryScene
+
+    fallback = default_tricky_quiz(lesson.language)
+    quiz = next((scene for scene in lesson.scenes if scene.type == "quiz"), None)
+    code_scene = next((scene for scene in lesson.scenes if scene.type == "code"), None)
+    intro = next((scene for scene in lesson.scenes if scene.type == "intro"), None)
+    summary = next((scene for scene in lesson.scenes if scene.type == "summary"), None)
+
+    options = list(getattr(quiz, "options", None) or [])
+    code = str(getattr(quiz, "code", None) or getattr(code_scene, "code", None) or "").strip()
+    if len(options) < 2 or not code:
+        quiz = QuizScene(
+            id=getattr(quiz, "id", None) or "scene_quiz",
+            duration=float(getattr(quiz, "duration", 9) or 9),
+            narration=getattr(quiz, "narration", None) or "Look close. Comment A, B, C, or D.",
+            kind=QuizKind.predict_output,
+            question=fallback["question"],
+            code=fallback["code"],
+            options=list(fallback["options"]),
+            answer=int(fallback["answer"]),
+            explanation=fallback["explanation"],
+            filename=fallback["filename"],
+            language=lesson.language,
+        )
+    else:
+        answer = getattr(quiz, "answer", 0)
+        if not isinstance(answer, int) or answer < 0 or answer >= len(options):
+            answer = 0
+        quiz = quiz.model_copy(
+            update={
+                "code": code,
+                "options": options[:4] if len(options) >= 4 else options,
+                "answer": answer,
+                "kind": getattr(quiz, "kind", None) or QuizKind.predict_output,
+                "question": getattr(quiz, "question", None) or fallback["question"],
+                "explanation": getattr(quiz, "explanation", None) or fallback["explanation"],
+                "filename": getattr(quiz, "filename", None) or fallback["filename"],
+            }
+        )
+
+    if intro is None:
+        intro = IntroScene(
+            id="scene_quiz_hook",
+            duration=5,
+            narration=pick_reel_hook(lesson.spoken_language, lesson.topic, lesson.lesson_id),
+        )
+    if summary is None:
+        letter = chr(65 + int(quiz.answer or 0))
+        correct = quiz.options[int(quiz.answer or 0)] if quiz.options else ""
+        summary = SummaryScene(
+            id="scene_quiz_end",
+            duration=10,
+            narration=quiz.explanation or f"The answer is {letter}, {correct}.",
+            takeaways=["Comment if you got it", lesson.topic],
+        )
+
+    return lesson.model_copy(
+        update={
+            "format": LessonFormat.reel,
+            "scenes": [intro, quiz, summary],
+            "requires_code": True,
+            "reel_mode": "quiz",
+            "code_examples": [quiz.code] if quiz.code else list(lesson.code_examples or []),
+        }
+    )
+
+
 def _normalize_reel(lesson: Lesson) -> Lesson:
     from app.schemas.lesson import ConceptScene, IntroScene, SummaryScene
+
+    if (getattr(lesson, "reel_mode", None) or "").strip().lower() == "quiz":
+        return _normalize_quiz_reel(lesson)
 
     conceptual = not topic_requires_code(lesson.topic)
     if lesson.requires_code is True:
@@ -883,13 +967,15 @@ def _fit_scene_durations(lesson: Lesson) -> Lesson:
 def _fit_reel_durations(lesson: Lesson) -> Lesson:
     target = float(normalize_reel_seconds(lesson.reel_seconds))
     scale_ratio = target / 30.0
+    quiz_reel = (getattr(lesson, "reel_mode", None) or "").strip().lower() == "quiz"
     caps = {
         "intro": (2.8, 8.0 * scale_ratio),
         "concept": (4.0, 16.0 * scale_ratio),
         "code": (4.0, 14.0 * scale_ratio),
         "execution": (2.8, 8.0 * scale_ratio),
         "terminal": (2.4, 6.0 * scale_ratio),
-        "summary": (2.4, 6.0 * scale_ratio),
+        "quiz": (7.5, 12.0 * scale_ratio),
+        "summary": (6.0, 16.0 * scale_ratio) if quiz_reel else (2.4, 6.0 * scale_ratio),
     }
     max_spoken = min(target * 0.55, 70.0)
     min_spoken = 2.4

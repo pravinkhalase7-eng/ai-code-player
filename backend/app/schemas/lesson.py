@@ -8,6 +8,16 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.services.locale import normalize_spoken_language
 
 REEL_SECONDS_CHOICES = (30, 60, 90, 120)
+REEL_MODES = ("code", "info", "explainer", "quiz")
+
+
+def normalize_reel_mode(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip().lower()
+    if cleaned not in REEL_MODES:
+        raise ValueError('reel_mode must be "code", "info", "explainer", "quiz", or null')
+    return cleaned
 
 
 def normalize_reel_seconds(value: object) -> int:
@@ -268,12 +278,7 @@ class TutorPlan(BaseModel):
     @field_validator("reel_mode")
     @classmethod
     def _reel_mode(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = str(value).strip().lower()
-        if cleaned not in {"code", "info", "explainer"}:
-            raise ValueError('reel_mode must be "code", "info", "explainer", or null')
-        return cleaned
+        return normalize_reel_mode(value)
 
 
 class Lesson(BaseModel):
@@ -312,12 +317,7 @@ class Lesson(BaseModel):
     @field_validator("reel_mode")
     @classmethod
     def _reel_mode(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = str(value).strip().lower()
-        if cleaned not in {"code", "info", "explainer"}:
-            raise ValueError('reel_mode must be "code", "info", "explainer", or null')
-        return cleaned
+        return normalize_reel_mode(value)
 
     @model_validator(mode="before")
     @classmethod
@@ -330,7 +330,10 @@ class Lesson(BaseModel):
     def _required_scene_types(self) -> Lesson:
         types = {scene.type for scene in self.scenes}
         if self.format == LessonFormat.reel:
-            if self.requires_code is False or ("code" not in types and "concept" in types):
+            mode = (self.reel_mode or "").strip().lower()
+            if mode == "quiz":
+                missing = {"intro", "quiz", "summary"} - types
+            elif self.requires_code is False or ("code" not in types and "concept" in types):
                 missing = {"intro", "concept", "summary"} - types
             else:
                 missing = {"intro", "code", "summary"} - types
@@ -395,6 +398,11 @@ class LessonDraft(BaseModel):
     @classmethod
     def _reel_seconds(cls, value: int) -> int:
         return normalize_reel_seconds(value)
+
+    @field_validator("reel_mode")
+    @classmethod
+    def _reel_mode(cls, value: str | None) -> str | None:
+        return normalize_reel_mode(value)
 
 
 def fallback_example_code(language: str) -> str:
@@ -462,9 +470,52 @@ def fill_empty_scene_code(data: dict) -> dict:
 def lesson_from_draft(draft: LessonDraft) -> Lesson:
     data = fill_empty_scene_code(draft.model_dump(mode="json"))
     types = {scene.get("type") for scene in data.get("scenes", [])}
+    if str(data.get("reel_mode") or "").strip().lower() == "quiz":
+        data = _ensure_quiz_reel_payload(data)
+        types = {scene.get("type") for scene in data.get("scenes", [])}
     if data.get("format") != "reel" and "quiz" not in types and {"intro", "code", "summary"} <= types:
         data["format"] = "reel"
     return Lesson.model_validate(data)
+
+
+def _ensure_quiz_reel_payload(data: dict) -> dict:
+    """Make a quiz reel pass Lesson validation even if the planner omitted options."""
+    data = dict(data)
+    scenes = [dict(scene) if isinstance(scene, dict) else scene for scene in (data.get("scenes") or [])]
+    data["scenes"] = scenes
+    data["format"] = "reel"
+    data["requires_code"] = True
+    data["reel_mode"] = "quiz"
+    quiz = next((scene for scene in scenes if isinstance(scene, dict) and scene.get("type") == "quiz"), None)
+    if quiz is None:
+        quiz = {
+            "id": "scene_quiz",
+            "type": "quiz",
+            "duration": 9,
+            "narration": "Look close. Comment A, B, C, or D.",
+            "question": "What does this print?",
+            "options": ["false", "true", "Error", "undefined"],
+            "answer": 1,
+            "explanation": "The trick is in how the language looks up that value.",
+            "code": 'console.log("turnOn" in lamp);',
+        }
+        scenes.append(quiz)
+    options = quiz.get("options") or []
+    if len(options) < 2:
+        quiz["options"] = ["false", "true", "Error", "undefined"]
+        quiz["answer"] = 1
+    if not isinstance(quiz.get("answer"), int):
+        quiz["answer"] = 0
+    if not str(quiz.get("question") or "").strip():
+        quiz["question"] = "What does this print?"
+    if not str(quiz.get("code") or "").strip():
+        code_scene = next(
+            (scene for scene in scenes if isinstance(scene, dict) and str(scene.get("code") or "").strip()),
+            None,
+        )
+        if code_scene:
+            quiz["code"] = code_scene.get("code")
+    return data
 
 
 class ChatReply(BaseModel):
