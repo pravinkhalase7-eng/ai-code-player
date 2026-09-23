@@ -209,6 +209,42 @@ issue_docvault_cert_if_needed() {
   return 0
 }
 
+manager_cert_exists() {
+  docker run --rm \
+    -v /etc/letsencrypt:/etc/letsencrypt:ro \
+    alpine:3.20 \
+    sh -c "test -f /etc/letsencrypt/live/manager.doxstation.com/fullchain.pem && test -f /etc/letsencrypt/live/manager.doxstation.com/privkey.pem"
+}
+
+issue_manager_cert_if_needed() {
+  if manager_cert_exists; then
+    echo "TLS cert already present for manager.doxstation.com"
+    return 0
+  fi
+
+  echo "No TLS cert for manager.doxstation.com — requesting Let's Encrypt (Env Manager)"
+  prepare_webroot
+  sleep 2
+
+  set +e
+  docker run --rm \
+    -v /etc/letsencrypt:/etc/letsencrypt \
+    -v /var/lib/letsencrypt:/var/lib/letsencrypt \
+    -v /var/www/html:/var/www/html \
+    certbot/certbot \
+    certonly --webroot -w /var/www/html \
+      -d manager.doxstation.com \
+      --non-interactive --agree-tos --register-unsafely-without-email \
+      --keep-until-expiring
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    echo "WARN: certbot failed for manager.doxstation.com. http://manager.doxstation.com still works on :80."
+    return 1
+  fi
+  return 0
+}
+
 # Host nginx copy is best-effort (doc-vault). Compose `nginx` is what serves :80.
 try_host_nginx_copy() {
   if [ ! -f "$HOST_HTTP_TEMPLATE" ] || [ ! -f "$HOST_HTTPS_TEMPLATE" ]; then
@@ -233,6 +269,7 @@ PLAY_TLS=0
 APEX_TLS=0
 SHORTS_TLS=0
 DOCVAULT_TLS=0
+MANAGER_TLS=0
 if issue_cert_if_needed && cert_exists; then
   PLAY_TLS=1
 fi
@@ -245,8 +282,11 @@ fi
 if issue_docvault_cert_if_needed && docvault_cert_exists; then
   DOCVAULT_TLS=1
 fi
+if issue_manager_cert_if_needed && manager_cert_exists; then
+  MANAGER_TLS=1
+fi
 
-if [ "$PLAY_TLS" = "1" ] || [ "$APEX_TLS" = "1" ] || [ "$SHORTS_TLS" = "1" ] || [ "$DOCVAULT_TLS" = "1" ]; then
+if [ "$PLAY_TLS" = "1" ] || [ "$APEX_TLS" = "1" ] || [ "$SHORTS_TLS" = "1" ] || [ "$DOCVAULT_TLS" = "1" ] || [ "$MANAGER_TLS" = "1" ]; then
   docker compose -f "$COMPOSE_FILE" up -d --force-recreate --no-deps nginx
   i=1
   while [ "$i" -le 10 ]; do
@@ -282,4 +322,10 @@ if [ "$DOCVAULT_TLS" = "1" ]; then
   echo "nginx ready: https://docvault.doxstation.com → DocVault :8088"
 else
   echo "http://docvault.doxstation.com works if DNS is set; https://docvault.doxstation.com needs a Let's Encrypt cert."
+fi
+
+if [ "$MANAGER_TLS" = "1" ]; then
+  echo "nginx ready: https://manager.doxstation.com → Env Manager :3050"
+else
+  echo "http://manager.doxstation.com works if DNS is set; https://manager.doxstation.com needs a Let's Encrypt cert."
 fi

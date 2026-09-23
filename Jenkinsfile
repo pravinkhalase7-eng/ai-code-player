@@ -74,6 +74,7 @@ pipeline {
           test -f deploy/nginx/Dockerfile || { echo "ERROR: deploy/nginx/Dockerfile missing"; exit 1; }
           test -f deploy/nginx/default.conf || { echo "ERROR: deploy/nginx/default.conf missing"; exit 1; }
           test -f deploy/nginx/https.conf.template || { echo "ERROR: deploy/nginx/https.conf.template missing"; exit 1; }
+          test -f deploy/nginx/https-envmanager.conf.template || { echo "ERROR: deploy/nginx/https-envmanager.conf.template missing"; exit 1; }
           test -f deploy/nginx/40-https.sh || { echo "ERROR: deploy/nginx/40-https.sh missing"; exit 1; }
           test -f deploy/edge.d/00-http.conf || { echo "ERROR: deploy/edge.d/00-http.conf missing"; exit 1; }
           test -f deploy/edge-https.conf.template || { echo "ERROR: deploy/edge-https.conf.template missing"; exit 1; }

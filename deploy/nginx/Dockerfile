@@ -7,5 +7,6 @@ COPY https-default.conf.template /etc/nginx/templates-extra/https-default.conf.t
 COPY https-aiteacher.conf.template /etc/nginx/templates-extra/https-aiteacher.conf.template
 COPY https-shortvideo.conf.template /etc/nginx/templates-extra/https-shortvideo.conf.template
 COPY https-docvault.conf.template /etc/nginx/templates-extra/https-docvault.conf.template
+COPY https-envmanager.conf.template /etc/nginx/templates-extra/https-envmanager.conf.template
 COPY 40-https.sh /docker-entrypoint.d/40-https.sh
 RUN chmod +x /docker-entrypoint.d/40-https.sh

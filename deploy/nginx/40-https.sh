@@ -71,3 +71,17 @@ else
   rm -f "$DOCVAULT_OUT"
   echo "nginx: HTTP only for docvault.doxstation.com (no cert yet)"
 fi
+
+# manager.doxstation.com → Env Manager (separate cert + vhost).
+ENVMANAGER_TPL="/etc/nginx/templates-extra/https-envmanager.conf.template"
+ENVMANAGER_OUT="/etc/nginx/conf.d/50-https-envmanager.conf"
+ENVMANAGER_CERT="/etc/letsencrypt/live/manager.doxstation.com/fullchain.pem"
+ENVMANAGER_KEY="/etc/letsencrypt/live/manager.doxstation.com/privkey.pem"
+
+if [ -f "$ENVMANAGER_CERT" ] && [ -f "$ENVMANAGER_KEY" ] && [ -f "$ENVMANAGER_TPL" ]; then
+  cp "$ENVMANAGER_TPL" "$ENVMANAGER_OUT"
+  echo "nginx: HTTPS enabled for manager.doxstation.com (Env Manager)"
+else
+  rm -f "$ENVMANAGER_OUT"
+  echo "nginx: HTTP only for manager.doxstation.com (no cert yet)"
+fi
