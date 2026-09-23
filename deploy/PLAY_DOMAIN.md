@@ -9,6 +9,7 @@ Jenkins starts Compose service **nginx** on host **80 / 443** (same firewall pat
 | A | `play` | `187.127.138.86` |
 | A | `@` (apex `doxstation.com`) | `187.127.138.86` |
 | A | `shorts` | `187.127.138.86` |
+| A | `docvault` | `187.127.138.86` |
 
 Wait until `dig +short play.doxstation.com @8.8.8.8` returns that IP.
 
@@ -30,8 +31,9 @@ Build with `PUBLIC_APP_URL=https://play.doxstation.com`. The Deploy stage starts
 2. Proxies `play.doxstation.com` `/` → frontend and `/api` `/audio` `/images` → backend
 3. Proxies `doxstation.com` `/` → host `:3000` (AI Teacher web) and `/api` → host `:8000` (AI Teacher API)
 4. Proxies `shorts.doxstation.com` `/` → host `:3123` (Short Video Maker)
-5. Serves Let's Encrypt HTTP-01 from `/var/www/html`
-6. Host Nginx stage enables HTTPS when the cert exists
+5. Proxies `docvault.doxstation.com` `/` → host `:8088` (DocVault)
+6. Serves Let's Encrypt HTTP-01 from `/var/www/html`
+7. Host Nginx stage enables HTTPS when the cert exists
 
 AI Teacher must keep publishing web on **3000** and API on **8000**. Do **not** start a second nginx on :80 for AI Teacher.
 

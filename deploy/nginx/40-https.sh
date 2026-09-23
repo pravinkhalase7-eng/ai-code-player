@@ -48,3 +48,17 @@ else
   rm -f "$SHORTVIDEO_OUT"
   echo "nginx: HTTP only for shorts.doxstation.com (no cert yet)"
 fi
+
+# docvault.doxstation.com → DocVault (separate cert + vhost).
+DOCVAULT_TPL="/etc/nginx/templates-extra/https-docvault.conf.template"
+DOCVAULT_OUT="/etc/nginx/conf.d/40-https-docvault.conf"
+DOCVAULT_CERT="/etc/letsencrypt/live/docvault.doxstation.com/fullchain.pem"
+DOCVAULT_KEY="/etc/letsencrypt/live/docvault.doxstation.com/privkey.pem"
+
+if [ -f "$DOCVAULT_CERT" ] && [ -f "$DOCVAULT_KEY" ] && [ -f "$DOCVAULT_TPL" ]; then
+  cp "$DOCVAULT_TPL" "$DOCVAULT_OUT"
+  echo "nginx: HTTPS enabled for docvault.doxstation.com (DocVault)"
+else
+  rm -f "$DOCVAULT_OUT"
+  echo "nginx: HTTP only for docvault.doxstation.com (no cert yet)"
+fi
