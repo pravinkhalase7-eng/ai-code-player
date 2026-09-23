@@ -21,6 +21,15 @@ else
   echo "nginx: HTTP only for play (no cert yet for ${DOMAIN:-unknown})"
 fi
 
+DEFAULT_TPL="/etc/nginx/templates-extra/https-default.conf.template"
+DEFAULT_OUT="/etc/nginx/conf.d/00-https-default.conf"
+if [ -f "$CERT" ] && [ -f "$KEY" ] && [ -f "$DEFAULT_TPL" ]; then
+  cp "$DEFAULT_TPL" "$DEFAULT_OUT"
+  echo "nginx: HTTPS default_server rejects unknown hostnames"
+else
+  rm -f "$DEFAULT_OUT"
+fi
+
 # Apex doxstation.com → AI Teacher (separate cert + vhost).
 AITEACHER_TPL="/etc/nginx/templates-extra/https-aiteacher.conf.template"
 AITEACHER_OUT="/etc/nginx/conf.d/20-https-aiteacher.conf"
