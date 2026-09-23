@@ -38,8 +38,8 @@ cert_exists() {
 }
 
 nginx_answers() {
-  docker compose -f "$COMPOSE_FILE" exec -T nginx wget -qO- http://127.0.0.1/ >/dev/null 2>&1 \
-    || docker compose -f "$COMPOSE_FILE" exec -T frontend wget -qO- http://nginx/ >/dev/null 2>&1
+  docker compose -f "$COMPOSE_FILE" exec -T nginx wget -qO- --header='Host: play.doxstation.com' http://127.0.0.1/ >/dev/null 2>&1 \
+    || docker compose -f "$COMPOSE_FILE" exec -T frontend wget -qO- --header='Host: play.doxstation.com' http://nginx/ >/dev/null 2>&1
 }
 
 reload_nginx() {

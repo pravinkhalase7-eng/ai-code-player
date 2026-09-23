@@ -319,8 +319,8 @@ pipeline {
             docker compose -f docker-compose.yml logs frontend --tail=40 || true
           fi
           echo "=== Public nginx ==="
-          docker compose -f docker-compose.yml exec -T nginx wget -qO- http://127.0.0.1/ >/tmp/aicoder_nginx.html 2>/dev/null \
-            || docker compose -f docker-compose.yml exec -T frontend wget -qO- http://nginx/ >/tmp/aicoder_nginx.html 2>/dev/null \
+          docker compose -f docker-compose.yml exec -T nginx wget -qO- --header='Host: play.doxstation.com' http://127.0.0.1/ >/tmp/aicoder_nginx.html 2>/dev/null \
+            || docker compose -f docker-compose.yml exec -T frontend wget -qO- --header='Host: play.doxstation.com' http://nginx/ >/tmp/aicoder_nginx.html 2>/dev/null \
             || true
           if [ -s /tmp/aicoder_nginx.html ]; then
             echo "nginx_ok bytes=$(wc -c </tmp/aicoder_nginx.html)"
