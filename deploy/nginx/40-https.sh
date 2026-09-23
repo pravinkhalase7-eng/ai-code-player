@@ -34,3 +34,17 @@ else
   rm -f "$AITEACHER_OUT"
   echo "nginx: HTTP only for doxstation.com (no cert yet)"
 fi
+
+# shorts.doxstation.com → Short Video Maker (separate cert + vhost).
+SHORTVIDEO_TPL="/etc/nginx/templates-extra/https-shortvideo.conf.template"
+SHORTVIDEO_OUT="/etc/nginx/conf.d/30-https-shortvideo.conf"
+SHORTVIDEO_CERT="/etc/letsencrypt/live/shorts.doxstation.com/fullchain.pem"
+SHORTVIDEO_KEY="/etc/letsencrypt/live/shorts.doxstation.com/privkey.pem"
+
+if [ -f "$SHORTVIDEO_CERT" ] && [ -f "$SHORTVIDEO_KEY" ] && [ -f "$SHORTVIDEO_TPL" ]; then
+  cp "$SHORTVIDEO_TPL" "$SHORTVIDEO_OUT"
+  echo "nginx: HTTPS enabled for shorts.doxstation.com (Short Video Maker)"
+else
+  rm -f "$SHORTVIDEO_OUT"
+  echo "nginx: HTTP only for shorts.doxstation.com (no cert yet)"
+fi

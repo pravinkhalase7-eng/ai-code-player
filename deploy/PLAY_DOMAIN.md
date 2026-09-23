@@ -8,6 +8,7 @@ Jenkins starts Compose service **nginx** on host **80 / 443** (same firewall pat
 |------|------|-------|
 | A | `play` | `187.127.138.86` |
 | A | `@` (apex `doxstation.com`) | `187.127.138.86` |
+| A | `shorts` | `187.127.138.86` |
 
 Wait until `dig +short play.doxstation.com @8.8.8.8` returns that IP.
 
@@ -28,8 +29,9 @@ Build with `PUBLIC_APP_URL=https://play.doxstation.com`. The Deploy stage starts
 1. Binds host **80** and **443** through Docker
 2. Proxies `play.doxstation.com` `/` → frontend and `/api` `/audio` `/images` → backend
 3. Proxies `doxstation.com` `/` → host `:3000` (AI Teacher web) and `/api` → host `:8000` (AI Teacher API)
-4. Serves Let's Encrypt HTTP-01 from `/var/www/html`
-5. Host Nginx stage enables HTTPS when the cert exists
+4. Proxies `shorts.doxstation.com` `/` → host `:3123` (Short Video Maker)
+5. Serves Let's Encrypt HTTP-01 from `/var/www/html`
+6. Host Nginx stage enables HTTPS when the cert exists
 
 AI Teacher must keep publishing web on **3000** and API on **8000**. Do **not** start a second nginx on :80 for AI Teacher.
 
@@ -41,6 +43,8 @@ curl -fsS https://play.doxstation.com/ | head
 curl -fsS https://play.doxstation.com/api/v1/health
 curl -fsS -H 'Host: doxstation.com' http://127.0.0.1/api/v1/health
 curl -fsS http://doxstation.com/api/v1/health
+curl -fsS -H 'Host: shorts.doxstation.com' http://127.0.0.1/health
+curl -fsS https://shorts.doxstation.com/health
 ```
 
 Direct UI (always): `http://play.doxstation.com:3010/`
@@ -49,7 +53,7 @@ Direct UI (always): `http://play.doxstation.com:3010/`
 
 - Jenkins uses host **8080**, so nginx must not bind 8080.
 - If certbot still times out, allow 80/443 on the Hostinger/cloud firewall, then rebuild.
-- `aicoder-nginx` uses `host.docker.internal` (compose `extra_hosts: host-gateway`) to reach AI Teacher.
+- `aicoder-nginx` uses `host.docker.internal` (compose `extra_hosts: host-gateway`) to reach AI Teacher (`:3000`/`:8000`) and Short Video Maker (`:3123`).
 - **Padlock / “connection is secure”** only appears on **https://**. `http://doxstation.com` will always show “Not secure”.
 - Visiting `https://doxstation.com` before an apex cert exists fails: Docker serves the **play.doxstation.com** cert on :443, which does not match the apex name.
 
@@ -70,4 +74,23 @@ cd /path/to/ai-coder   # or re-run AI Coder Jenkins
 docker compose up -d --build --force-recreate --no-deps nginx
 
 curl -fsS https://doxstation.com/api/v1/health
+```
+
+### Issue TLS for shorts (padlock on shorts.doxstation.com)
+
+```bash
+# DNS first: A record shorts → 187.127.138.86
+docker run --rm \
+  -v /etc/letsencrypt:/etc/letsencrypt \
+  -v /var/lib/letsencrypt:/var/lib/letsencrypt \
+  -v /var/www/html:/var/www/html \
+  certbot/certbot certonly --webroot -w /var/www/html \
+  -d shorts.doxstation.com \
+  --non-interactive --agree-tos --register-unsafely-without-email
+
+# Rebuild nginx so 40-https.sh loads the shorts HTTPS vhost
+cd /path/to/ai-coder   # or re-run AI Coder Jenkins
+docker compose up -d --build --force-recreate --no-deps nginx
+
+curl -fsS https://shorts.doxstation.com/health
 ```

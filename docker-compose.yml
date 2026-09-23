@@ -145,7 +145,7 @@ services:
     restart: unless-stopped
     environment:
       NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-play.doxstation.com}
-    # Reach AI Teacher (and other host-published apps) from inside this container.
+    # Reach AI Teacher, Short Video Maker, and other host-published apps from inside this container.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
