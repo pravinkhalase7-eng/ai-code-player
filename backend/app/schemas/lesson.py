@@ -291,7 +291,7 @@ class Lesson(BaseModel):
     topic: str = Field(min_length=1, max_length=200)
     objectives: list[str] = Field(min_length=1, max_length=8)
     concepts: list[str] = Field(default_factory=list)
-    scenes: list[LessonScene] = Field(min_length=3, max_length=24)
+    scenes: list[LessonScene] = Field(min_length=2, max_length=24)
     code_examples: list[str] = Field(default_factory=list)
     thumbnail_url: str | None = None
     thumbnail_custom: bool = False
@@ -334,7 +334,7 @@ class Lesson(BaseModel):
             if mode == "quiz":
                 missing = {"intro", "quiz", "summary"} - types
             elif mode == "runner":
-                missing = {"intro", "code", "execution"} - types
+                missing = {"code", "execution"} - types
             elif self.requires_code is False or ("code" not in types and "concept" in types):
                 missing = {"intro", "concept", "summary"} - types
             else:
@@ -384,7 +384,7 @@ class LessonDraft(BaseModel):
     topic: str = Field(min_length=1, max_length=200)
     objectives: list[str] = Field(min_length=1, max_length=8)
     concepts: list[str] = Field(default_factory=list)
-    scenes: list[GenericScene] = Field(min_length=3, max_length=24)
+    scenes: list[GenericScene] = Field(min_length=2, max_length=24)
     thumbnail_url: str | None = None
     thumbnail_custom: bool = False
     reel_seconds: int = 30
@@ -524,42 +524,37 @@ def _ensure_quiz_reel_payload(data: dict) -> dict:
 
 
 def _ensure_runner_reel_payload(data: dict) -> dict:
-    """Make a program-runner reel pass validation if the planner omitted execution."""
+    """Keep a program-runner lesson as snippet + debug, not a code-short reel."""
     data = dict(data)
     scenes = [dict(scene) if isinstance(scene, dict) else scene for scene in (data.get("scenes") or [])]
+    scenes = [
+        scene
+        for scene in scenes
+        if isinstance(scene, dict) and scene.get("type") in {"code", "execution"}
+    ]
     data["scenes"] = scenes
     data["format"] = "reel"
     data["requires_code"] = True
     data["reel_mode"] = "runner"
     language = str(data.get("language") or "java")
-    types = {scene.get("type") for scene in scenes if isinstance(scene, dict)}
-    if "intro" not in types:
-        scenes.insert(
-            0,
-            {
-                "id": "scene_runner_hook",
-                "type": "intro",
-                "duration": 4,
-                "narration": "Watch this run line by line.",
-            },
-        )
-    code_scene = next((scene for scene in scenes if isinstance(scene, dict) and scene.get("type") == "code"), None)
+    code_scene = next((scene for scene in scenes if scene.get("type") == "code"), None)
+    exec_scene = next((scene for scene in scenes if scene.get("type") == "execution"), None)
     if code_scene is None:
+        snippet = str((exec_scene or {}).get("code") or "").strip() or fallback_example_code(language)
         code_scene = {
             "id": "scene_runner_code",
             "type": "code",
-            "duration": 6,
-            "narration": "Here is the program we will step through.",
+            "duration": 3,
+            "narration": "Here is the program.",
             "language": language,
-            "code": fallback_example_code(language),
+            "code": snippet,
         }
-        scenes.append(code_scene)
+        scenes.insert(0, code_scene)
     if not str(code_scene.get("code") or "").strip():
         code_scene["code"] = fallback_example_code(language)
-    types = {scene.get("type") for scene in scenes if isinstance(scene, dict)}
-    if "execution" not in types:
+    if exec_scene is None:
         insert_at = next(
-            (index for index, scene in enumerate(scenes) if isinstance(scene, dict) and scene.get("type") == "code"),
+            (index for index, scene in enumerate(scenes) if scene.get("type") == "code"),
             0,
         ) + 1
         scenes.insert(
@@ -567,7 +562,7 @@ def _ensure_runner_reel_payload(data: dict) -> dict:
             {
                 "id": "scene_runner_debug",
                 "type": "execution",
-                "duration": 14,
+                "duration": 20,
                 "narration": "Watch each line run. The debugger steps, variables update, and prints land in the console.",
                 "language": language,
                 "code": code_scene.get("code") or fallback_example_code(language),

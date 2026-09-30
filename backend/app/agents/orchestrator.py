@@ -392,8 +392,9 @@ def plan_lesson(
             )
         elif mode == "runner":
             message += (
-                " This is a PROGRAM RUNNER reel: requires_code=true, reel_mode=runner. "
-                "Plan intro, code snippet, then an execution scene that walks the program line by line in debug mode."
+                " This is a PROGRAM RUNNER, not a code-short reel: requires_code=true, reel_mode=runner. "
+                "Plan ONLY a code scene that shows the snippet, then an execution scene that debugs it line by line. "
+                "No intro, no summary, no quiz."
             )
         elif mode == "explainer":
             message += (
@@ -718,48 +719,68 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
                 and any(scene.type == "concept" for scene in lesson.scenes)
             )
         )
-    allowed = {"intro", "concept", "summary"} if explain else {"intro", "code", "execution", "terminal", "summary"}
+    allowed = {"intro", "concept", "summary"} if explain else (
+        {"code", "execution"} if runner else {"intro", "code", "execution", "terminal", "summary"}
+    )
     scenes = [scene for scene in lesson.scenes if scene.type in allowed]
     types = {scene.type for scene in scenes}
     locale = spoken_locale(lesson.spoken_language)
-    if "intro" not in types:
-        scenes.insert(
-            0,
-            IntroScene(
-                id="scene_reel_hook",
-                duration=6,
-                narration=pick_reel_hook(lesson.spoken_language, lesson.topic, lesson.lesson_id),
-            ),
-        )
-    if explain and "concept" not in types:
-        scenes.insert(
-            1,
-            ConceptScene(
-                id="scene_reel_concept",
-                duration=14,
-                narration=lesson.topic,
-                bullets=[lesson.topic],
-            ),
-        )
-    if "summary" not in types:
-        scenes.append(
-            SummaryScene(
-                id="scene_reel_end",
-                duration=5,
-                narration=locale.reel_end,
-                takeaways=["Save this", lesson.topic],
-            ),
-        )
+    if not runner:
+        if "intro" not in types:
+            scenes.insert(
+                0,
+                IntroScene(
+                    id="scene_reel_hook",
+                    duration=6,
+                    narration=pick_reel_hook(lesson.spoken_language, lesson.topic, lesson.lesson_id),
+                ),
+            )
+        if explain and "concept" not in types:
+            scenes.insert(
+                1,
+                ConceptScene(
+                    id="scene_reel_concept",
+                    duration=14,
+                    narration=lesson.topic,
+                    bullets=[lesson.topic],
+                ),
+            )
+        if "summary" not in types:
+            scenes.append(
+                SummaryScene(
+                    id="scene_reel_end",
+                    duration=5,
+                    narration=locale.reel_end,
+                    takeaways=["Save this", lesson.topic],
+                ),
+            )
     if runner:
+        from app.schemas.lesson import CodeScene, fallback_example_code
+
         types = {scene.type for scene in scenes}
         code_scene = next((scene for scene in scenes if scene.type == "code"), None)
+        exec_scene = next((scene for scene in scenes if scene.type == "execution"), None)
+        snippet = (
+            getattr(code_scene, "code", None)
+            or getattr(exec_scene, "code", None)
+            or fallback_example_code(lesson.language)
+        )
+        if code_scene is None:
+            code_scene = CodeScene(
+                id="scene_runner_code",
+                duration=3,
+                narration="Here is the program.",
+                language=lesson.language,
+                code=snippet,
+            )
+            scenes.insert(0, code_scene)
         if "execution" not in types and code_scene is not None and getattr(code_scene, "code", None):
             insert_at = next((i for i, scene in enumerate(scenes) if scene.type == "code"), 0) + 1
             scenes.insert(
                 insert_at,
                 ExecutionScene(
                     id="scene_runner_debug",
-                    duration=14,
+                    duration=20,
                     narration="Watch each line run. The debugger steps, variables update, and prints land in the console.",
                     language=lesson.language,
                     code=code_scene.code,
@@ -770,8 +791,10 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
 
         filled = []
         for scene in scenes:
+            if scene.type not in {"code", "execution"}:
+                continue
             if scene.type == "code":
-                filled.append(_clip_runner_code_narration(scene))
+                filled.append(_clip_runner_code_narration(scene, max_words=18))
                 continue
             if scene.type == "execution" and not getattr(scene, "iterations", None):
                 steps = visualize_execution(lesson.language, getattr(scene, "code", "") or "")
@@ -1031,8 +1054,8 @@ def _fit_reel_durations(lesson: Lesson) -> Lesson:
     caps = {
         "intro": (2.4, 5.0 * scale_ratio) if runner_reel else (2.8, 8.0 * scale_ratio),
         "concept": (4.0, 16.0 * scale_ratio),
-        "code": (3.5, 8.0 * scale_ratio) if runner_reel else (4.0, 14.0 * scale_ratio),
-        "execution": (10.0, 22.0 * scale_ratio) if runner_reel else (2.8, 8.0 * scale_ratio),
+        "code": (2.4, 4.5 * scale_ratio) if runner_reel else (4.0, 14.0 * scale_ratio),
+        "execution": (18.0, 28.0 * scale_ratio) if runner_reel else (2.8, 8.0 * scale_ratio),
         "terminal": (2.4, 6.0 * scale_ratio),
         "quiz": (7.5, 12.0 * scale_ratio),
         "summary": (6.0, 16.0 * scale_ratio) if quiz_reel else (2.4, 6.0 * scale_ratio),

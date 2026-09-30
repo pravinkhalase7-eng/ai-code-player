@@ -443,11 +443,10 @@ def test_runner_reel_accepts_debug_walk() -> None:
         "topic": "for loop",
         "objectives": ["See each line run", "Watch i change"],
         "scenes": [
-            {"id": "hook", "type": "intro", "duration": 4, "narration": "Watch this run line by line."},
             {
                 "id": "code",
                 "type": "code",
-                "duration": 6,
+                "duration": 3,
                 "language": "java",
                 "code": JAVA_FOR,
                 "narration": "Here is a tiny for loop we will debug.",
@@ -455,31 +454,33 @@ def test_runner_reel_accepts_debug_walk() -> None:
             {
                 "id": "debug",
                 "type": "execution",
-                "duration": 14,
+                "duration": 22,
                 "code": JAVA_FOR,
                 "narration": "i starts at 0, 0 is less than 5, print 0, then i becomes 1.",
                 "expected_output": [],
                 "iterations": [],
             },
+        ],
+    }
+    lesson = Lesson.model_validate(payload)
+    assert lesson.reel_mode == "runner"
+    assert {scene.type for scene in lesson.scenes} == {"code", "execution"}
+    incomplete = {
+        **payload,
+        "scenes": [
+            payload["scenes"][0],
             {
                 "id": "end",
                 "type": "summary",
                 "duration": 4,
                 "narration": "The debugger walked every line. Save this.",
-                "takeaways": ["Watch each line", "Follow for more"],
+                "takeaways": ["Watch each line"],
             },
         ],
     }
-    lesson = Lesson.model_validate(payload)
-    assert lesson.reel_mode == "runner"
-    assert {scene.type for scene in lesson.scenes} >= {"intro", "code", "execution"}
-    incomplete = {
-        **payload,
-        "scenes": [payload["scenes"][0], payload["scenes"][1], payload["scenes"][3]],
-    }
     repaired = lesson_from_draft(LessonDraft.model_validate(incomplete))
     assert repaired.reel_mode == "runner"
-    assert any(scene.type == "execution" for scene in repaired.scenes)
+    assert {scene.type for scene in repaired.scenes} == {"code", "execution"}
     assert any((scene.code or "").strip() for scene in repaired.scenes if scene.type == "code")
 
 
@@ -523,7 +524,7 @@ def test_normalize_runner_clips_code_lecture() -> None:
         ],
     }
     lesson = _normalize_reel(Lesson.model_validate(payload))
+    assert {scene.type for scene in lesson.scenes} == {"code", "execution"}
     code = next(scene for scene in lesson.scenes if scene.type == "code")
-    assert len(code.narration.split()) <= 32
+    assert len(code.narration.split()) <= 18
     assert "System.out.println" not in code.narration
-    assert any(scene.type == "execution" for scene in lesson.scenes)

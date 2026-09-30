@@ -1308,6 +1308,7 @@ function drawFrame(
   const vars = (beat?.variables || []).slice(0, 3).map((item) => `${item.name}=${item.value}`).join("  ");
   const topic = displayTopic(lesson.topic);
   const cta = reelCta(lesson, scene);
+  const showDebugPanel = debugging || runnerLesson;
 
   drawProgress(ctx, sceneIndex, sceneCount, duration > 0 ? elapsed / duration : 0);
   drawFollowChip(ctx, cta.handle);
@@ -1379,7 +1380,7 @@ function drawFrame(
     const headerBottom = 360; // topic + larger Byte + karaoke caption
     const available = HEIGHT - footer - headerBottom;
     const lineCount = Math.max(1, (code || " ").replace(/\n$/, "").split("\n").length);
-    const consoleH = debugging ? Math.min(170, 56 + Math.max(1, outputLines.length) * 22) : 0;
+    const consoleH = showDebugPanel ? Math.min(170, 56 + Math.max(1, outputLines.length) * 22) : 0;
     const ideH = Math.min(available, Math.max(240, 42 + lineCount * 24 + 28 + consoleH));
     const ideTop = headerBottom + Math.max(0, (available - ideH) / 2);
     const filename = scene.filename || "Main.java";
@@ -1392,7 +1393,7 @@ function drawFrame(
       filename,
       code,
       highlight,
-      debugging
+      showDebugPanel
         ? {
             label: beat
               ? `${runnerLesson ? "DEBUG" : "OUTPUT"}  ·  ${beat.label}`

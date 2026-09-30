@@ -74,7 +74,7 @@ export function ReelStage({
   const karaokeText = stripDurationNoise(karaokeCue?.text || spokenCaption || scene.narration || "");
   const karaokeStart = karaokeCue?.start ?? 0;
   const karaokeEnd = karaokeCue?.end ?? Math.max(duration, karaokeStart + 0.5);
-  const showConsole = running || Boolean(runError || scene.stderr);
+  const showConsole = runnerLesson || running || Boolean(runError || scene.stderr);
   const topic = displayTopic(lesson.topic);
   const explainMotion = isExplainMotionLesson(lesson);
   const quizLesson = isTrickyQuizLesson(lesson);

@@ -259,7 +259,7 @@ export function Dashboard() {
               { id: "info" as const, label: "Info reel", hint: "No program — concepts like LLMs" },
               { id: "explainer" as const, label: "Explainer", hint: "Diagrams + how it works" },
               { id: "quiz" as const, label: "Tricky quiz", hint: "Timer + MCQ, then explain" },
-              { id: "runner" as const, label: "Program runner", hint: "Snippet + line-by-line debug" },
+              { id: "runner" as const, label: "Program runner", hint: "Just the snippet, then debug run" },
             ] as const
           ).map((item) => (
             <button
