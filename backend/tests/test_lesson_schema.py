@@ -184,6 +184,14 @@ def test_python_and_js_visualizers() -> None:
     assert [step.output_line for step in js_steps if step.output_line] == ["0", "1", "2"]
 
 
+def test_visualizer_line_walk_without_loop() -> None:
+    code = "int a = 1;\nint b = 2;\nSystem.out.println(a + b);\n"
+    steps = visualize_execution("java", code, ["3"])
+    assert len(steps) >= 2
+    assert any(step.line == 1 for step in steps)
+    assert any(step.output_line == "3" for step in steps)
+
+
 def test_empty_execution_code_inherits_from_previous_scene() -> None:
     payload = {
         "lesson_id": "reel-empty-exec",
@@ -421,3 +429,55 @@ def test_quiz_reel_accepts_timer_format() -> None:
     fixed_quiz = next(scene for scene in repaired.scenes if scene.type == "quiz")
     assert len(fixed_quiz.options) >= 2
     assert isinstance(fixed_quiz.answer, int)
+
+
+def test_runner_reel_accepts_debug_walk() -> None:
+    payload = {
+        "lesson_id": "java-for-runner",
+        "title": "Watch the for loop run",
+        "language": "java",
+        "level": "beginner",
+        "format": "reel",
+        "reel_mode": "runner",
+        "requires_code": True,
+        "topic": "for loop",
+        "objectives": ["See each line run", "Watch i change"],
+        "scenes": [
+            {"id": "hook", "type": "intro", "duration": 4, "narration": "Watch this run line by line."},
+            {
+                "id": "code",
+                "type": "code",
+                "duration": 6,
+                "language": "java",
+                "code": JAVA_FOR,
+                "narration": "Here is a tiny for loop we will debug.",
+            },
+            {
+                "id": "debug",
+                "type": "execution",
+                "duration": 14,
+                "code": JAVA_FOR,
+                "narration": "i starts at 0, 0 is less than 5, print 0, then i becomes 1.",
+                "expected_output": [],
+                "iterations": [],
+            },
+            {
+                "id": "end",
+                "type": "summary",
+                "duration": 4,
+                "narration": "The debugger walked every line. Save this.",
+                "takeaways": ["Watch each line", "Follow for more"],
+            },
+        ],
+    }
+    lesson = Lesson.model_validate(payload)
+    assert lesson.reel_mode == "runner"
+    assert {scene.type for scene in lesson.scenes} >= {"intro", "code", "execution"}
+    incomplete = {
+        **payload,
+        "scenes": [payload["scenes"][0], payload["scenes"][1], payload["scenes"][3]],
+    }
+    repaired = lesson_from_draft(LessonDraft.model_validate(incomplete))
+    assert repaired.reel_mode == "runner"
+    assert any(scene.type == "execution" for scene in repaired.scenes)
+    assert any((scene.code or "").strip() for scene in repaired.scenes if scene.type == "code")

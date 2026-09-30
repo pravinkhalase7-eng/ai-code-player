@@ -93,6 +93,8 @@ def thumbnail_prompt(
         hooks = ["कौन सा?", "वाह!", "रुको!", "ये कैसे?", "सच??"]
     elif mode == "quiz":
         hooks = ["90% FAIL THIS", "WHICH ONE?", "WAIT…", "MOST MISS THIS", "A B C OR D?"]
+    elif mode == "runner":
+        hooks = ["WATCH IT RUN", "LINE BY LINE", "DEBUG THIS", "STEP INTO IT", "SEE EACH LINE"]
     else:
         hooks = ["WHICH ONE?", "WAIT…", "MOST MISS THIS", "THIS OR THAT?", "WHY?"]
     seed = int(hashlib.sha256(f"{topic_clean}|{lang}|{mode}".encode()).hexdigest()[:8], 16)
@@ -126,7 +128,15 @@ def thumbnail_prompt(
             "large neon concept cards naming the real subtopics from the video title; light trails connecting them"
         )
 
-    explain = "tricky coding quiz" if mode == "quiz" else "how-it-works explainer" if mode in {"explainer", "info"} else "coding short"
+    explain = (
+        "tricky coding quiz"
+        if mode == "quiz"
+        else "line-by-line program runner"
+        if mode == "runner"
+        else "how-it-works explainer"
+        if mode in {"explainer", "info"}
+        else "coding short"
+    )
 
     return (
         f"Create a highly catchy, high-CTR vertical 9:16 thumbnail/poster for a programming video. "
@@ -936,7 +946,7 @@ def write_svg_poster(
   <circle cx="{120}" cy="{1680}" r="{280 + (seed % 60)}" fill="{colors["accent"]}" fill-opacity="0.12"/>
   <rect x="72" y="96" rx="28" width="360" height="72" fill="#fff"/>
   <text x="252" y="144" text-anchor="middle" font-size="28" font-family="ui-sans-serif, system-ui" font-weight="800" fill="#18181b">TECHSHALA</text>
-  <text x="72" y="240" font-size="26" font-family="ui-sans-serif, system-ui" letter-spacing="8" fill="{colors["accent"]}">{html.escape((mode.upper() if mode in {"explainer", "info"} else lang.upper()))}</text>
+  <text x="72" y="240" font-size="26" font-family="ui-sans-serif, system-ui" letter-spacing="8" fill="{colors["accent"]}">{html.escape(("DEBUG" if mode == "runner" else mode.upper() if mode in {"explainer", "info"} else lang.upper()))}</text>
   {code_block}
   {"".join(title_svg)}
   <text x="72" y="1760" font-size="30" font-family="ui-sans-serif, system-ui" fill="{colors["accent"]}">@{html.escape("techshalabypavi")}</text>

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.services.locale import normalize_spoken_language
 
 REEL_SECONDS_CHOICES = (30, 60, 90, 120)
-REEL_MODES = ("code", "info", "explainer", "quiz")
+REEL_MODES = ("code", "info", "explainer", "quiz", "runner")
 
 
 def normalize_reel_mode(value: str | None) -> str | None:
@@ -16,7 +16,7 @@ def normalize_reel_mode(value: str | None) -> str | None:
         return None
     cleaned = str(value).strip().lower()
     if cleaned not in REEL_MODES:
-        raise ValueError('reel_mode must be "code", "info", "explainer", "quiz", or null')
+        raise ValueError('reel_mode must be "code", "info", "explainer", "quiz", "runner", or null')
     return cleaned
 
 
@@ -333,6 +333,8 @@ class Lesson(BaseModel):
             mode = (self.reel_mode or "").strip().lower()
             if mode == "quiz":
                 missing = {"intro", "quiz", "summary"} - types
+            elif mode == "runner":
+                missing = {"intro", "code", "execution"} - types
             elif self.requires_code is False or ("code" not in types and "concept" in types):
                 missing = {"intro", "concept", "summary"} - types
             else:
@@ -468,11 +470,14 @@ def fill_empty_scene_code(data: dict) -> dict:
 
 
 def lesson_from_draft(draft: LessonDraft) -> Lesson:
-    data = fill_empty_scene_code(draft.model_dump(mode="json"))
-    types = {scene.get("type") for scene in data.get("scenes", [])}
-    if str(data.get("reel_mode") or "").strip().lower() == "quiz":
+    data = draft.model_dump(mode="json")
+    mode = str(data.get("reel_mode") or "").strip().lower()
+    if mode == "quiz":
         data = _ensure_quiz_reel_payload(data)
-        types = {scene.get("type") for scene in data.get("scenes", [])}
+    elif mode == "runner":
+        data = _ensure_runner_reel_payload(data)
+    data = fill_empty_scene_code(data)
+    types = {scene.get("type") for scene in data.get("scenes", [])}
     if data.get("format") != "reel" and "quiz" not in types and {"intro", "code", "summary"} <= types:
         data["format"] = "reel"
     return Lesson.model_validate(data)
@@ -515,6 +520,60 @@ def _ensure_quiz_reel_payload(data: dict) -> dict:
         )
         if code_scene:
             quiz["code"] = code_scene.get("code")
+    return data
+
+
+def _ensure_runner_reel_payload(data: dict) -> dict:
+    """Make a program-runner reel pass validation if the planner omitted execution."""
+    data = dict(data)
+    scenes = [dict(scene) if isinstance(scene, dict) else scene for scene in (data.get("scenes") or [])]
+    data["scenes"] = scenes
+    data["format"] = "reel"
+    data["requires_code"] = True
+    data["reel_mode"] = "runner"
+    language = str(data.get("language") or "java")
+    types = {scene.get("type") for scene in scenes if isinstance(scene, dict)}
+    if "intro" not in types:
+        scenes.insert(
+            0,
+            {
+                "id": "scene_runner_hook",
+                "type": "intro",
+                "duration": 4,
+                "narration": "Watch this run line by line.",
+            },
+        )
+    code_scene = next((scene for scene in scenes if isinstance(scene, dict) and scene.get("type") == "code"), None)
+    if code_scene is None:
+        code_scene = {
+            "id": "scene_runner_code",
+            "type": "code",
+            "duration": 6,
+            "narration": "Here is the program we will step through.",
+            "language": language,
+            "code": fallback_example_code(language),
+        }
+        scenes.append(code_scene)
+    if not str(code_scene.get("code") or "").strip():
+        code_scene["code"] = fallback_example_code(language)
+    types = {scene.get("type") for scene in scenes if isinstance(scene, dict)}
+    if "execution" not in types:
+        insert_at = next(
+            (index for index, scene in enumerate(scenes) if isinstance(scene, dict) and scene.get("type") == "code"),
+            0,
+        ) + 1
+        scenes.insert(
+            insert_at,
+            {
+                "id": "scene_runner_debug",
+                "type": "execution",
+                "duration": 14,
+                "narration": "Watch each line run. The debugger steps, variables update, and prints land in the console.",
+                "language": language,
+                "code": code_scene.get("code") or fallback_example_code(language),
+                "expected_output": [],
+            },
+        )
     return data
 
 

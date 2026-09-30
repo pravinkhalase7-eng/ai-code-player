@@ -7,8 +7,9 @@ export function isPosterScene(type: string | undefined): boolean {
   return type === "intro" || type === "summary";
 }
 
-export function commentPrompt(topic: string, quiz = false): string {
+export function commentPrompt(topic: string, quiz = false, runner = false): string {
   if (quiz) return "Comment A, B, C, or D";
+  if (runner) return "Comment the next print";
   const text = (topic || "").toLowerCase();
   if (/(callback|promise|async)/.test(text)) return "Comment: callback, promise, or async?";
   if (/\bloop/.test(text)) return "Comment: for or while?";
@@ -20,12 +21,14 @@ export function commentPrompt(topic: string, quiz = false): string {
 export function reelCta(lesson: Lesson, scene?: LessonScene) {
   const topic = displayTopic(lesson.topic);
   const takeaway = scene?.takeaways?.[0] || "";
+  const mode = (lesson.reel_mode || "").trim().toLowerCase();
+  const runner = mode === "runner";
   return {
     handle: REEL_HANDLE,
     follow: "Follow",
     save: "Save",
-    comment: commentPrompt(topic, (lesson.reel_mode || "") === "quiz"),
-    endLine: takeaway || `Save this ${topic} trick`,
+    comment: commentPrompt(topic, mode === "quiz", runner),
+    endLine: takeaway || (runner ? `Watch this ${topic} run` : `Save this ${topic} trick`),
     endAction: "Follow @techshalabypavi for daily shorts",
   };
 }

@@ -285,6 +285,42 @@ def _steps_from_stdout(code: str, stdout: list[str]) -> list[ExecutionStep]:
     return steps
 
 
+_SKIP_LINE = re.compile(
+    r"^(public\s+class\b|class\b|import\b|package\b|def\s+main\b|public\s+static\s+void\s+main\b|"
+    r"//|#|/\*|\*|\{|\})$"
+)
+
+
+def _visualize_line_walk(code: str, stdout: list[str] | None = None) -> list[ExecutionStep]:
+    """Debugger-style steps: one beat per executable line, prints attached to print lines."""
+    stdout = stdout or []
+    out_index = 0
+    steps: list[ExecutionStep] = []
+    index = 1
+    for line_no, raw in enumerate(code.splitlines(), start=1):
+        stripped = raw.strip()
+        if not stripped or _SKIP_LINE.match(stripped):
+            continue
+        is_print = bool(re.search(r"System\.out|console\.log|\bprint(ln)?\s*\(", stripped, re.I))
+        printed = None
+        if is_print and out_index < len(stdout):
+            printed = stdout[out_index]
+            out_index += 1
+        steps.append(
+            ExecutionStep(
+                index=index,
+                label=f"LINE {line_no}",
+                description=(f"print {printed}" if printed is not None else stripped[:96]),
+                line=line_no,
+                output_line=printed,
+            )
+        )
+        index += 1
+        if len(steps) >= 28:
+            break
+    return steps
+
+
 def visualize_execution(language: str, code: str, stdout: list[str] | None = None) -> list[ExecutionStep]:
     lang = normalize_language(language)
     stdout = stdout or []
@@ -299,9 +335,12 @@ def visualize_execution(language: str, code: str, stdout: list[str] | None = Non
         steps = _visualize_c_style(code, stdout)
         if steps:
             return steps
+    walked = _visualize_line_walk(code, stdout)
+    if len(walked) >= 2:
+        return walked
     if stdout:
         return _steps_from_stdout(code, stdout)
-    return []
+    return walked
 
 
 def extract_primary_code(lesson_json: dict[str, Any]) -> tuple[str, str]:

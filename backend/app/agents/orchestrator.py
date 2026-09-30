@@ -24,6 +24,7 @@ from app.agents.topic_mode import (
     default_tricky_quiz,
     explain_reel_planner_instruction,
     explainer_reel_planner_instruction,
+    program_runner_planner_instruction,
     topic_is_hashmap,
     topic_requires_code,
     tricky_quiz_reel_planner_instruction,
@@ -377,7 +378,7 @@ def plan_lesson(
         f"Topic: {topic}\nProgramming language: {language}\nRequested level: {level}\nFormat: {fmt}\n"
     )
     mode = (reel_mode or "").strip().lower() or None
-    if mode not in {None, "code", "info", "explainer", "quiz"}:
+    if mode not in {None, "code", "info", "explainer", "quiz", "runner"}:
         mode = None
     if fmt == "reel":
         message += (
@@ -388,6 +389,11 @@ def plan_lesson(
             message += (
                 " This is a TRICKY QUIZ reel: requires_code=true, reel_mode=quiz. "
                 "Plan intro, quiz (code + 4 options), and summary explanation. No execution scene."
+            )
+        elif mode == "runner":
+            message += (
+                " This is a PROGRAM RUNNER reel: requires_code=true, reel_mode=runner. "
+                "Plan intro, code snippet, then an execution scene that walks the program line by line in debug mode."
             )
         elif mode == "explainer":
             message += (
@@ -413,6 +419,9 @@ def plan_lesson(
         if mode == "quiz":
             plan.requires_code = True
             plan.reel_mode = "quiz"
+        elif mode == "runner":
+            plan.requires_code = True
+            plan.reel_mode = "runner"
         elif mode == "explainer":
             plan.requires_code = False
             plan.reel_mode = "explainer"
@@ -460,6 +469,8 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
     plan_mode = (getattr(plan, "reel_mode", None) or "").strip().lower()
     if is_reel and plan_mode == "quiz":
         planner = AgentSpec("quiz_reel_planner_agent", tricky_quiz_reel_planner_instruction(seconds), LessonDraft, 0.35)
+    elif is_reel and plan_mode == "runner":
+        planner = AgentSpec("runner_reel_planner_agent", program_runner_planner_instruction(seconds), LessonDraft, 0.35)
     elif is_reel and plan_mode == "explainer":
         planner = AgentSpec("explainer_reel_planner_agent", explainer_reel_planner_instruction(seconds), LessonDraft, 0.35)
     elif is_reel and not plan.requires_code:
@@ -670,14 +681,16 @@ def _normalize_quiz_reel(lesson: Lesson) -> Lesson:
 
 
 def _normalize_reel(lesson: Lesson) -> Lesson:
-    from app.schemas.lesson import ConceptScene, IntroScene, SummaryScene
+    from app.schemas.lesson import ConceptScene, ExecutionScene, IntroScene, SummaryScene
 
     if (getattr(lesson, "reel_mode", None) or "").strip().lower() == "quiz":
         return _normalize_quiz_reel(lesson)
 
+    runner = (getattr(lesson, "reel_mode", None) or "").strip().lower() == "runner"
+
     conceptual = not topic_requires_code(lesson.topic)
-    if lesson.requires_code is True:
-        # Code short: keep code/execution scenes even for "what is …" topics.
+    if runner or lesson.requires_code is True:
+        # Code short / program runner: keep code/execution scenes even for "what is …" topics.
         explain = False
     else:
         explain = (
@@ -720,6 +733,32 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
                 takeaways=["Save this", lesson.topic],
             ),
         )
+    if runner:
+        types = {scene.type for scene in scenes}
+        code_scene = next((scene for scene in scenes if scene.type == "code"), None)
+        if "execution" not in types and code_scene is not None and getattr(code_scene, "code", None):
+            insert_at = next((i for i, scene in enumerate(scenes) if scene.type == "code"), 0) + 1
+            scenes.insert(
+                insert_at,
+                ExecutionScene(
+                    id="scene_runner_debug",
+                    duration=14,
+                    narration="Watch each line run. The debugger steps, variables update, and prints land in the console.",
+                    language=lesson.language,
+                    code=code_scene.code,
+                    expected_output=[],
+                ),
+            )
+        from app.services.visualizer import visualize_execution
+
+        filled = []
+        for scene in scenes:
+            if scene.type == "execution" and not getattr(scene, "iterations", None):
+                steps = visualize_execution(lesson.language, getattr(scene, "code", "") or "")
+                filled.append(scene.model_copy(update={"iterations": steps}) if steps else scene)
+            else:
+                filled.append(scene)
+        scenes = filled
     if explain:
         from app.schemas.lesson import DiagramStep
 
@@ -773,7 +812,7 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
     if explain and not mode:
         mode = "info"
     if not explain:
-        mode = mode or "code"
+        mode = mode or ("runner" if runner else "code")
     return lesson.model_copy(
         update={
             "format": LessonFormat.reel,
@@ -968,11 +1007,12 @@ def _fit_reel_durations(lesson: Lesson) -> Lesson:
     target = float(normalize_reel_seconds(lesson.reel_seconds))
     scale_ratio = target / 30.0
     quiz_reel = (getattr(lesson, "reel_mode", None) or "").strip().lower() == "quiz"
+    runner_reel = (getattr(lesson, "reel_mode", None) or "").strip().lower() == "runner"
     caps = {
-        "intro": (2.8, 8.0 * scale_ratio),
+        "intro": (2.4, 5.0 * scale_ratio) if runner_reel else (2.8, 8.0 * scale_ratio),
         "concept": (4.0, 16.0 * scale_ratio),
-        "code": (4.0, 14.0 * scale_ratio),
-        "execution": (2.8, 8.0 * scale_ratio),
+        "code": (3.5, 8.0 * scale_ratio) if runner_reel else (4.0, 14.0 * scale_ratio),
+        "execution": (10.0, 22.0 * scale_ratio) if runner_reel else (2.8, 8.0 * scale_ratio),
         "terminal": (2.4, 6.0 * scale_ratio),
         "quiz": (7.5, 12.0 * scale_ratio),
         "summary": (6.0, 16.0 * scale_ratio) if quiz_reel else (2.4, 6.0 * scale_ratio),

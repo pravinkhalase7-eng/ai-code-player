@@ -283,3 +283,40 @@ Hard rules:
 - language and filename must match (Main.java / main.py / main.js).
 """.strip()
 
+
+def program_runner_planner_instruction(seconds: int = 30) -> str:
+    target = normalize_reel_seconds(seconds)
+    words_lo = int(round(target * 2.3))
+    words_hi = int(round(target * 3.0))
+    scale = target / 30.0
+
+    def span(low: float, high: float) -> str:
+        return f"{int(round(low * scale))}-{int(round(high * scale))}s"
+
+    return (
+        f"""
+You are the Lesson Planner Agent for a PROGRAM RUNNER reel — a debug walkthrough short.
+The viewer sees a complete snippet, then watches it run LINE BY LINE like a debugger: current line, variables, print output.
+Create a tight visual short. Total spoken time across ALL scenes MUST be about {target} seconds ({words_lo}-{words_hi} words total).
+Set reel_seconds to {target}. Set requires_code to true. Set reel_mode to "runner". format must be "reel".
+
+Required scenes IN THIS ORDER: intro, code, execution, summary.
+Do NOT include concept or quiz scenes.
+
+Hard rules:
+- Intro ({span(3, 5)}): One hook. "Watch this run line by line." Name the program. Never open with stop scrolling. Do not teach the concept in the abstract.
+- Code ({span(5, 8)}): Show the FULL tiny runnable snippet. 8-18 lines max, phone-readable. Narrate what the program is, not a textbook definition.
+  Java: public class Main in Main.java. Python: complete main.py. JavaScript: complete main.js.
+  Prefer a clear loop or sequential statements with prints so debug steps are visible (init, condition, body, increment).
+- Execution ({span(12, 18)}): SAME code as the code scene. This is the main scene. Narrate the debugger walk: quote the live line, say the variable values, say what prints.
+  expected_output must be an empty list. Never invent stdout. Never claim it already ran.
+  Speak as if you are stepping: "i is 0, 0 < 5 is true, print 0, i becomes 1."
+- Summary ({span(3, 5)}): One takeaway about what the run proved. Ask them to follow / save.
+- Spoken style: flowing spoken lines, catchy, not a lecture.
+  Do NOT end every clause with a period. Link related clauses with commas so TTS does not pause between every sentence.
+- Never say "{target} seconds" or "in this short" in narration or titles.
+- spoken_language must match the tutor plan for all spoken lines, takeaways, and the title. Keep code tokens in English.
+- lesson_id should be a short slug.
+- language and filename must match.
+""".strip()
+    )

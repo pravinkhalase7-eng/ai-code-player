@@ -3,12 +3,13 @@ import { audioSrc } from "@/lib/utils";
 import { visemeAt, VISEME_MOUTH } from "@/lib/viseme";
 import { activeWordIndex, buildKaraokeWords, karaokeWindow } from "@/lib/karaokeCaption";
 import { buildCues, cueAt, estimatedSpeechDuration } from "@/lib/narrationSync";
-import { beatHighlight, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
+import { beatHighlight, debugBeats, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
 import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
 import { isPosterScene, reelCta } from "@/lib/reelCta";
 import { isExplainMotionLesson, lessonExplainedTopics, synthesizeBoardSteps } from "@/lib/explainerVisuals";
 import { infoBulletAt } from "@/lib/infoReelAnim";
 import { QUIZ_LETTERS, isTrickyQuizLesson, trickyQuizState } from "@/lib/trickyQuiz";
+import { isProgramRunnerLesson } from "@/lib/programRunner";
 import { sliceAudioBuffer, speechBounds } from "@/lib/speechEnvelope";
 
 const WIDTH = 720;
@@ -1286,14 +1287,19 @@ function drawFrame(
 ) {
   const explainMotion = isExplainMotionLesson(lesson);
   const quizLesson = isTrickyQuizLesson(lesson);
-  const poster = isPosterScene(scene.type) && !explainMotion && !quizLesson;
+  const runnerLesson = isProgramRunnerLesson(lesson);
+  const poster = isPosterScene(scene.type) && !explainMotion && !quizLesson && !runnerLesson;
   if (poster) {
     if (!drawCoverImage(ctx, thumb)) drawStudioBackground(ctx);
   } else {
     drawStudioBackground(ctx);
   }
   const debugging = scene.type === "execution" || scene.type === "terminal";
-  const beats = debugging ? reelBeats(scene, code, duration) : [];
+  const beats = debugging
+    ? runnerLesson
+      ? debugBeats(scene, code, duration)
+      : reelBeats(scene, code, duration)
+    : [];
   const beat = debugging ? reelBeatAt(beats, elapsed) : null;
   const cue = cueAt(buildCues(scene, duration), elapsed);
   const highlight = debugging ? beatHighlight(beat) : (cue?.highlight ?? null);
@@ -1350,10 +1356,11 @@ function drawFrame(
   } else if (quizLesson) {
     drawQuizPanel(ctx, lesson, scene, elapsed, duration);
   } else if (
-    scene.type === "concept" ||
-    explainMotion ||
-    lesson.requires_code === false ||
-    lesson.reel_mode === "explainer"
+    !runnerLesson &&
+    (scene.type === "concept" ||
+      explainMotion ||
+      lesson.requires_code === false ||
+      lesson.reel_mode === "explainer")
   ) {
     drawConceptPanel(ctx, scene, elapsed, duration, topic, lesson);
   } else {
@@ -1387,7 +1394,11 @@ function drawFrame(
       highlight,
       debugging
         ? {
-            label: beat ? `OUTPUT  ·  ${beat.label}` : "OUTPUT",
+            label: beat
+              ? `${runnerLesson ? "DEBUG" : "OUTPUT"}  ·  ${beat.label}`
+              : runnerLesson
+                ? "DEBUG"
+                : "OUTPUT",
             condition: beat?.condition
               ? `${beat.condition} → ${beat.condition_result ? "true" : "false"}`
               : undefined,

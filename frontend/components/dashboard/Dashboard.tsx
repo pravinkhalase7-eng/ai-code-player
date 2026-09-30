@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type MouseEvent } from "react";
-import { ArrowRight, CircleHelp, Clapperboard, Expand, GitBranch, ImageIcon, Info, RefreshCw, Sparkles, Timer, Trash2, X } from "lucide-react";
+import { ArrowRight, Bug, CircleHelp, Clapperboard, Expand, GitBranch, ImageIcon, Info, RefreshCw, Sparkles, Timer, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -145,7 +145,11 @@ export function Dashboard() {
       const apiFormat = format === "lesson" ? "lesson" : "reel";
       if (apiFormat === "reel") storeReelSeconds(reelSeconds);
       const requiresCode =
-        format === "info" || format === "explainer" ? false : format === "reel" || format === "quiz" ? true : undefined;
+        format === "info" || format === "explainer"
+          ? false
+          : format === "reel" || format === "quiz" || format === "runner"
+            ? true
+            : undefined;
       const reelMode =
         format === "explainer"
           ? "explainer"
@@ -153,9 +157,11 @@ export function Dashboard() {
             ? "info"
             : format === "quiz"
               ? "quiz"
-              : format === "reel"
-                ? "code"
-                : undefined;
+              : format === "runner"
+                ? "runner"
+                : format === "reel"
+                  ? "code"
+                  : undefined;
       const defaultTopic =
         format === "explainer"
           ? "how hashmap works in java"
@@ -163,7 +169,9 @@ export function Dashboard() {
             ? "what is large language model"
             : format === "quiz"
               ? "tricky quiz: what does this print"
-              : "for loop";
+              : format === "runner"
+                ? "for loop"
+                : "for loop";
       const created = await createLesson(
         topic || defaultTopic,
         language,
@@ -191,7 +199,7 @@ export function Dashboard() {
         </h1>
         <p className="mt-4 max-w-2xl text-base text-zinc-400 sm:text-lg">
           Ask for a concept. Byte generates a lesson, types the code, runs it in a sandbox, and walks through every iteration.
-          Or cut a catchy short — coding demos, or explain-only topics like "what is an LLM".
+          Or cut a catchy short — coding demos, quizzes, line-by-line program runners, or explain-only topics like "what is an LLM".
         </p>
       </div>
 
@@ -251,6 +259,7 @@ export function Dashboard() {
               { id: "info" as const, label: "Info reel", hint: "No program — concepts like LLMs" },
               { id: "explainer" as const, label: "Explainer", hint: "Diagrams + how it works" },
               { id: "quiz" as const, label: "Tricky quiz", hint: "Timer + MCQ, then explain" },
+              { id: "runner" as const, label: "Program runner", hint: "Snippet + line-by-line debug" },
             ] as const
           ).map((item) => (
             <button
@@ -269,6 +278,9 @@ export function Dashboard() {
                 if (item.id === "quiz" && (!topic.trim() || /for loop|hashmap|language model/i.test(topic))) {
                   setTopic("tricky quiz: what does this print");
                 }
+                if (item.id === "runner" && (!topic.trim() || /hashmap|language model|tricky quiz/i.test(topic))) {
+                  setTopic("for loop");
+                }
               }}
               className={cn(
                 "rounded-2xl border px-4 py-3 text-left transition",
@@ -279,7 +291,9 @@ export function Dashboard() {
                       ? "border-cyan-300/60 bg-cyan-400/15 text-white"
                       : item.id === "quiz"
                         ? "border-rose-300/60 bg-rose-400/15 text-white"
-                        : "border-amber-300/60 bg-amber-400/15 text-white"
+                        : item.id === "runner"
+                          ? "border-lime-300/60 bg-lime-400/15 text-white"
+                          : "border-amber-300/60 bg-amber-400/15 text-white"
                   : "border-white/10 bg-white/5 text-zinc-300 hover:border-amber-300/30",
               )}
             >
@@ -292,6 +306,8 @@ export function Dashboard() {
                   <GitBranch className="h-4 w-4 text-cyan-300" />
                 ) : item.id === "quiz" ? (
                   <CircleHelp className="h-4 w-4 text-rose-300" />
+                ) : item.id === "runner" ? (
+                  <Bug className="h-4 w-4 text-lime-300" />
                 ) : (
                   <Sparkles className="h-4 w-4 text-amber-300" />
                 )}
@@ -301,7 +317,7 @@ export function Dashboard() {
             </button>
           ))}
         </div>
-        {format === "reel" || format === "info" || format === "explainer" || format === "quiz" ? (
+        {format === "reel" || format === "info" || format === "explainer" || format === "quiz" || format === "runner" ? (
           <div className="mb-4">
             <p className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
               <Timer className="h-3.5 w-3.5" />
@@ -334,7 +350,19 @@ export function Dashboard() {
         <div className="flex flex-col gap-3 sm:flex-row">
           <Input value={topic} onChange={(event) => setTopic(event.target.value)} />
           <Button onClick={start} disabled={busy} className="min-h-11 w-full sm:w-48">
-            {busy ? "Preparing..." : format === "explainer" ? "Make Explainer" : format === "info" ? "Make Info Reel" : format === "quiz" ? "Make Quiz" : format === "reel" ? "Make a Short" : "Start Learning"}
+            {busy
+              ? "Preparing..."
+              : format === "explainer"
+                ? "Make Explainer"
+                : format === "info"
+                  ? "Make Info Reel"
+                  : format === "quiz"
+                    ? "Make Quiz"
+                    : format === "runner"
+                      ? "Make Runner"
+                      : format === "reel"
+                        ? "Make a Short"
+                        : "Start Learning"}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
@@ -398,7 +426,9 @@ export function Dashboard() {
                             {lesson.format === "reel"
                               ? lesson.reel_mode === "quiz"
                                 ? `${lesson.reel_seconds || 30}s Quiz`
-                                : lesson.reel_mode === "explainer"
+                                : lesson.reel_mode === "runner"
+                                  ? `${lesson.reel_seconds || 30}s Runner`
+                                  : lesson.reel_mode === "explainer"
                                 ? `${lesson.reel_seconds || 30}s Explainer`
                                 : lesson.reel_mode === "info" || lesson.requires_code === false
                                   ? `${lesson.reel_seconds || 30}s Info`

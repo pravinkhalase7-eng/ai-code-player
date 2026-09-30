@@ -76,6 +76,31 @@ export function reelBeats(scene: LessonScene, code: string, duration: number): R
   });
 }
 
+export function debugBeats(scene: LessonScene, code: string, duration: number): ReelBeat[] {
+  const steps = (scene.iterations || []).length ? scene.iterations! : printSteps(scene, code);
+  if (!steps.length) return reelBeats(scene, code, duration);
+  const span = Math.max(duration, 0.4);
+  const slice = span / steps.length;
+  const printed: string[] = [];
+  return steps.map((step, index) => {
+    if (step.output_line) printed.push(String(step.output_line));
+    const latest = printed.length ? printed[printed.length - 1] : undefined;
+    return {
+      start: index * slice,
+      end: index === steps.length - 1 ? span + 0.05 : (index + 1) * slice,
+      line: step.line || printStatementLine(code) || 1,
+      label: step.label || `step ${index + 1}`,
+      description: step.description || "",
+      output: [...printed],
+      latest,
+      variables: (step.variables || []).map((item) => ({ name: item.name, value: item.value })),
+      condition: step.condition,
+      condition_result: step.condition_result,
+      stopped: step.stopped,
+    };
+  });
+}
+
 export function reelBeatAt(beats: ReelBeat[], time: number): ReelBeat | null {
   if (!beats.length) return null;
   const t = Math.max(0, time);
@@ -88,6 +113,6 @@ export function beatHighlight(beat: ReelBeat | null): HighlightRange | null {
     start_line: beat.line,
     end_line: beat.line,
     start_col: 0,
-    label: "print",
+    label: beat.label || "step",
   };
 }

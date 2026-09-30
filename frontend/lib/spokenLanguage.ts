@@ -35,13 +35,20 @@ export function storeSpokenLanguage(value: SpokenLanguage) {
 
 const FORMAT_KEY = "lesson_format";
 
-export type MakeMode = "lesson" | "reel" | "info" | "explainer" | "quiz";
+export type MakeMode = "lesson" | "reel" | "info" | "explainer" | "quiz" | "runner";
 
 export function readStoredFormat(): MakeMode {
   if (typeof window === "undefined") return "lesson";
   try {
     const stored = window.localStorage.getItem(FORMAT_KEY);
-    if (stored === "reel" || stored === "info" || stored === "explainer" || stored === "quiz") return stored;
+    if (
+      stored === "reel" ||
+      stored === "info" ||
+      stored === "explainer" ||
+      stored === "quiz" ||
+      stored === "runner"
+    )
+      return stored;
     return "lesson";
   } catch {
     return "lesson";

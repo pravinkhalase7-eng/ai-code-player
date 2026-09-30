@@ -778,7 +778,9 @@ export function LessonPlayer({
             {isReel
               ? lesson.reel_mode === "quiz"
                 ? `${spokenLabel} · Tricky quiz · ${lesson.topic}`
-                : lesson.reel_mode === "explainer"
+                : lesson.reel_mode === "runner"
+                  ? `${spokenLabel} · Program runner · ${lesson.topic}`
+                  : lesson.reel_mode === "explainer"
                 ? `${spokenLabel} · Explainer · ${lesson.topic}`
                 : lesson.requires_code === false
                   ? `${spokenLabel} · Explain · ${lesson.topic}`
@@ -1073,7 +1075,7 @@ function scriptLinesFrom(lesson: Lesson): ScriptLine[] {
 
 function isExplainLesson(lesson: Lesson): boolean {
   // Explicit Code short must never be treated as Info reel.
-  if (lesson.reel_mode === "quiz") return false;
+  if (lesson.reel_mode === "quiz" || lesson.reel_mode === "runner") return false;
   if (lesson.requires_code === true && lesson.reel_mode !== "explainer" && lesson.reel_mode !== "info") return false;
   if (lesson.reel_mode === "explainer" || lesson.reel_mode === "info") return true;
   if (lesson.requires_code === false) return true;

@@ -23,7 +23,9 @@ export function buildThumbnailPrompt(lesson: Lesson, seed = 42): string {
     ? ["कौन सा?", "वाह!", "रुको!", "ये कैसे?", "सच??"]
     : mode === "quiz"
       ? ["90% FAIL THIS", "WHICH ONE?", "WAIT…", "MOST MISS THIS", "A B C OR D?"]
-      : ["WHICH ONE?", "WAIT…", "MOST MISS THIS", "THIS OR THAT?", "WHY?"];
+      : mode === "runner"
+        ? ["WATCH IT RUN", "LINE BY LINE", "DEBUG THIS", "STEP INTO IT", "SEE EACH LINE"]
+        : ["WHICH ONE?", "WAIT…", "MOST MISS THIS", "THIS OR THAT?", "WHY?"];
   const hook = hooks[Math.abs(seed) % hooks.length];
 
   const blob = topic.toLowerCase();
@@ -45,7 +47,13 @@ export function buildThumbnailPrompt(lesson: Lesson, seed = 42): string {
   }
 
   const explain =
-    mode === "quiz" ? "tricky coding quiz" : mode === "explainer" || mode === "info" ? "how-it-works explainer" : "coding short";
+    mode === "quiz"
+      ? "tricky coding quiz"
+      : mode === "runner"
+        ? "line-by-line program runner"
+        : mode === "explainer" || mode === "info"
+          ? "how-it-works explainer"
+          : "coding short";
 
   return (
     `Create a highly catchy, high-CTR vertical 9:16 thumbnail/poster for a programming video. ` +

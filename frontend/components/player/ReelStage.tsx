@@ -11,9 +11,10 @@ import { MechanismBoard } from "@/components/player/MechanismBoard";
 import type { HashMapVisual } from "@/types/lesson";
 import { boardStateFromSteps } from "@/lib/hashmapPhase";
 import { sourceFilename } from "@/lib/language";
-import { beatHighlight, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
+import { beatHighlight, debugBeats, reelBeatAt, reelBeats } from "@/lib/reelDebugSync";
 import { isPosterScene, reelCta } from "@/lib/reelCta";
 import { isTrickyQuizLesson, trickyQuizState } from "@/lib/trickyQuiz";
+import { isProgramRunnerLesson } from "@/lib/programRunner";
 import { boardKindLabel, isExplainMotionLesson, lessonExplainedTopicDetails, lessonExplainedTopics, synthesizeBoardSteps } from "@/lib/explainerVisuals";
 import { beatsFromSegments, infoBulletAt, infoBulletAtBeats, playInfoBulletBlip } from "@/lib/infoReelAnim";
 import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
@@ -51,14 +52,15 @@ export function ReelStage({
   sceneIndex?: number;
   sceneCount?: number;
 }) {
+  const runnerLesson = isProgramRunnerLesson(lesson);
   const running = scene.type === "execution" || scene.type === "terminal";
   const timedScene = useMemo(
     () => (iterations.length ? { ...scene, iterations } : scene),
     [scene, iterations],
   );
   const beats = useMemo(
-    () => (running ? reelBeats(timedScene, code, duration) : []),
-    [running, timedScene, code, duration],
+    () => (running ? (runnerLesson ? debugBeats(timedScene, code, duration) : reelBeats(timedScene, code, duration)) : []),
+    [running, runnerLesson, timedScene, code, duration],
   );
   const beat = running ? reelBeatAt(beats, currentTime) : null;
   const activeHighlight = running ? beatHighlight(beat) : highlight;
@@ -81,18 +83,20 @@ export function ReelStage({
     [quizLesson, lesson, scene, currentTime, duration],
   );
   // Code shorts keep static poster intros/summaries; explainer/info always get motion boards.
-  const poster = isPosterScene(scene.type) && !explainMotion && !quizLesson;
+  const poster = isPosterScene(scene.type) && !explainMotion && !quizLesson && !runnerLesson;
   const thumb = lesson.thumbnail_url || "";
   const cta = reelCta(lesson, scene);
   const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
   const isExplainer =
-    lesson.reel_mode === "explainer" ||
-    (lesson.reel_mode !== "info" && Boolean(scene.diagram_steps && scene.diagram_steps.length));
+    !runnerLesson &&
+    (lesson.reel_mode === "explainer" ||
+    (lesson.reel_mode !== "info" && Boolean(scene.diagram_steps && scene.diagram_steps.length)));
   const isConcept =
-    scene.type === "concept" ||
+    !runnerLesson &&
+    (scene.type === "concept" ||
     (explainMotion && (scene.type === "intro" || scene.type === "summary")) ||
     ((scene.type === "code" || scene.type === "execution") &&
-      (!(code || "").trim() || lesson.requires_code === false));
+      (!(code || "").trim() || lesson.requires_code === false)));
   const diagramSteps = useMemo(() => {
     // Prefer planner diagram_steps/bullets; else synthesize from visual/segments/narration
     // so kind:none never leaves a blank stage on explainer/info.
@@ -467,6 +471,11 @@ export function ReelStage({
             <p className="inline-flex rounded-full border border-cyan-200/30 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-100">
               {lesson.language}
             </p>
+            {runnerLesson ? (
+              <p className="mt-1 inline-flex rounded-full border border-amber-300/40 bg-amber-400/15 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.18em] text-amber-100">
+                {running ? "Debug" : "Snippet"}
+              </p>
+            ) : null}
             <h2 className="mt-2 line-clamp-2 text-2xl font-extrabold leading-7 tracking-tight text-white">{topic}</h2>
           </header>
       <div className="relative z-20 mt-2 flex shrink-0 items-center gap-3 px-1">
@@ -497,7 +506,13 @@ export function ReelStage({
                 <div className="shrink-0 border-t border-amber-300/25 bg-black/55 px-3 py-2">
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300">
-                      {beat ? `Output · ${beat.label}` : "Output"}
+                      {beat
+                        ? runnerLesson
+                          ? `Debug · ${beat.label}`
+                          : `Output · ${beat.label}`
+                        : runnerLesson
+                          ? "Debug"
+                          : "Output"}
                     </p>
                     {beat?.variables?.length ? (
                       <div className="flex flex-wrap justify-end gap-1">
@@ -512,6 +527,9 @@ export function ReelStage({
                       </div>
                     ) : null}
                   </div>
+                  {runnerLesson && beat?.description ? (
+                    <p className="mb-1 font-mono text-[11px] text-amber-50">{beat.description}</p>
+                  ) : null}
                   {beat?.condition ? (
                     <p className="mb-1 font-mono text-[10px] text-zinc-400">
                       {beat.condition} → {beat.condition_result ? "true" : "false"}
