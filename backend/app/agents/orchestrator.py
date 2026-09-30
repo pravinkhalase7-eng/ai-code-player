@@ -448,9 +448,11 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
     is_reel = plan.format == LessonFormat.reel
     seconds = normalize_reel_seconds(plan.reel_seconds) if is_reel else 30
     reel_label = f"{seconds}-second catchy reel" if is_reel else "lesson"
+    plan_mode = (getattr(plan, "reel_mode", None) or "").strip().lower()
+    teaching_rules = "" if plan_mode == "runner" else f"{CODE_TEACHING_RULES}\n"
     message = (
         f"{spoken_generation_rules(plan.spoken_language)}\n"
-        f"{CODE_TEACHING_RULES}\n"
+        f"{teaching_rules}"
         f"Create the {reel_label}. Teach THIS topic; do not substitute a different concept.\n"
         f"lesson_id={lesson_id}\n"
         f"title={plan.title}\n"
@@ -466,7 +468,6 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
         f"requires_code={plan.requires_code}\n"
         f"reel_mode={getattr(plan, 'reel_mode', None)}\n"
     )
-    plan_mode = (getattr(plan, "reel_mode", None) or "").strip().lower()
     if is_reel and plan_mode == "quiz":
         planner = AgentSpec("quiz_reel_planner_agent", tricky_quiz_reel_planner_instruction(seconds), LessonDraft, 0.35)
     elif is_reel and plan_mode == "runner":
@@ -519,7 +520,10 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
     )
     spoken_rules = f"{spoken_generation_rules(plan.spoken_language)}\n{CODE_TEACHING_RULES}"
     quiz_reel = is_reel and plan_mode == "quiz"
-    if plan.requires_code and not quiz_reel and (not has_code or empty_main or stub_code_talk):
+    runner_reel = is_reel and plan_mode == "runner"
+    # Runner shorts keep a 1-2 sentence snippet intro. CODE_AGENT treats that as a stub
+    # and rewrites it into a code-short lecture, so skip those follow-up agents.
+    if plan.requires_code and not quiz_reel and not runner_reel and (not has_code or empty_main or stub_code_talk):
         lesson = invoke_agent(CODE_AGENT, f"{spoken_rules}\n{lesson.model_dump_json()}")
         assert isinstance(lesson, Lesson)
         lesson.spoken_language = plan.spoken_language
@@ -527,7 +531,7 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
     has_highlights = any(
         getattr(scene, "highlight_ranges", None) for scene in lesson.scenes if scene.type == "code"
     )
-    if plan.requires_code and not quiz_reel and not has_highlights:
+    if plan.requires_code and not quiz_reel and not runner_reel and not has_highlights:
         lesson = invoke_agent(VISUAL_AGENT, f"{spoken_rules}\n{lesson.model_dump_json()}")
         assert isinstance(lesson, Lesson)
         lesson.spoken_language = plan.spoken_language
@@ -541,6 +545,8 @@ def generate_structured_lesson(plan: TutorPlan, lesson_id: str) -> Lesson:
     lesson.format = plan.format
     lesson.spoken_language = plan.spoken_language
     lesson.reel_seconds = seconds
+    lesson.requires_code = bool(plan.requires_code)
+    lesson.reel_mode = getattr(plan, "reel_mode", None)
     if lesson.format == LessonFormat.reel:
         lesson = _normalize_reel(lesson)
     lesson = _localize_lesson(lesson)
@@ -680,6 +686,17 @@ def _normalize_quiz_reel(lesson: Lesson) -> Lesson:
     )
 
 
+def _clip_runner_code_narration(scene, max_words: int = 32):
+    """Keep the runner code scene as a snippet intro, not a code-short lecture."""
+    words = (scene.narration or "").split()
+    if len(words) <= max_words:
+        return scene
+    text = " ".join(words[:max_words]).rstrip(" ,;:")
+    if text and text[-1] not in ".!?":
+        text += "."
+    return scene.model_copy(update={"narration": text, "segments": []})
+
+
 def _normalize_reel(lesson: Lesson) -> Lesson:
     from app.schemas.lesson import ConceptScene, ExecutionScene, IntroScene, SummaryScene
 
@@ -753,6 +770,9 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
 
         filled = []
         for scene in scenes:
+            if scene.type == "code":
+                filled.append(_clip_runner_code_narration(scene))
+                continue
             if scene.type == "execution" and not getattr(scene, "iterations", None):
                 steps = visualize_execution(lesson.language, getattr(scene, "code", "") or "")
                 filled.append(scene.model_copy(update={"iterations": steps}) if steps else scene)

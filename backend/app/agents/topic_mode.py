@@ -305,7 +305,9 @@ Do NOT include concept or quiz scenes.
 
 Hard rules:
 - Intro ({span(3, 5)}): One hook. "Watch this run line by line." Name the program. Never open with stop scrolling. Do not teach the concept in the abstract.
-- Code ({span(5, 8)}): Show the FULL tiny runnable snippet. 8-18 lines max, phone-readable. Narrate what the program is, not a textbook definition.
+- Code ({span(5, 8)}): Show the FULL tiny runnable snippet. 8-18 lines max, phone-readable.
+  Code narration is 1-2 short sentences that NAME the program only — "Here is a for loop that prints 0, 1, 2."
+  Do NOT walk lines, quote tokens, or teach init/condition/increment here. That is the execution scene.
   Java: public class Main in Main.java. Python: complete main.py. JavaScript: complete main.js.
   Prefer a clear loop or sequential statements with prints so debug steps are visible (init, condition, body, increment).
 - Execution ({span(12, 18)}): SAME code as the code scene. This is the main scene. Narrate the debugger walk: quote the live line, say the variable values, say what prints.

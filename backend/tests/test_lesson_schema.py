@@ -481,3 +481,49 @@ def test_runner_reel_accepts_debug_walk() -> None:
     assert repaired.reel_mode == "runner"
     assert any(scene.type == "execution" for scene in repaired.scenes)
     assert any((scene.code or "").strip() for scene in repaired.scenes if scene.type == "code")
+
+
+def test_normalize_runner_clips_code_lecture() -> None:
+    from app.agents.orchestrator import _normalize_reel
+
+    lecture = (
+        "On line 3, for int i = 0, i < 3, i++ sets up the loop: int i = 0 creates integer "
+        "counter i at 0, i < 3 tests if i is under 3 before running, and i++ adds 1 to i after "
+        "each pass. On line 4, System.out.println(i) prints current counter i to standard output."
+    )
+    payload = {
+        "lesson_id": "runner-clip",
+        "title": "Watch the for loop run",
+        "language": "java",
+        "level": "beginner",
+        "format": "reel",
+        "reel_mode": "runner",
+        "requires_code": True,
+        "topic": "for loop",
+        "objectives": ["See each line run"],
+        "scenes": [
+            {"id": "hook", "type": "intro", "duration": 4, "narration": "Watch this run line by line."},
+            {
+                "id": "code",
+                "type": "code",
+                "duration": 20,
+                "language": "java",
+                "code": JAVA_FOR,
+                "narration": lecture,
+            },
+            {
+                "id": "debug",
+                "type": "execution",
+                "duration": 14,
+                "code": JAVA_FOR,
+                "narration": "i starts at 0, then print, then i becomes 1.",
+                "expected_output": [],
+            },
+            {"id": "end", "type": "summary", "duration": 4, "narration": "Save this debug walk."},
+        ],
+    }
+    lesson = _normalize_reel(Lesson.model_validate(payload))
+    code = next(scene for scene in lesson.scenes if scene.type == "code")
+    assert len(code.narration.split()) <= 32
+    assert "System.out.println" not in code.narration
+    assert any(scene.type == "execution" for scene in lesson.scenes)
