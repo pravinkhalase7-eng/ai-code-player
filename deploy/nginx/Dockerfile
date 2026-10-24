@@ -2,6 +2,7 @@
 # bind-mount ./deploy/edge.d from the Jenkins workspace path.
 FROM nginx:1.27-alpine
 COPY default.conf /etc/nginx/conf.d/default.conf
+COPY aicoder-play.inc /etc/nginx/aicoder-play.inc
 COPY https.conf.template /etc/nginx/templates-extra/https.conf.template
 COPY https-default.conf.template /etc/nginx/templates-extra/https-default.conf.template
 COPY https-aiteacher.conf.template /etc/nginx/templates-extra/https-aiteacher.conf.template
