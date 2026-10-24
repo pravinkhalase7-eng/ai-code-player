@@ -39,16 +39,12 @@ pipeline {
     WEB_IMAGE_LATEST     = 'ai-coder-web:latest'
     RUNNER_IMAGE         = "ai-coder-runner:${env.BUILD_NUMBER}"
     RUNNER_IMAGE_LATEST  = 'ai-coder-runner:latest'
-    NGINX_IMAGE          = "aicoder-nginx:${env.BUILD_NUMBER}"
-    NGINX_IMAGE_LATEST   = 'aicoder-nginx:latest'
     COMPOSE_PROJECT_NAME = 'aicoder'
     API_HOST_PORT        = '8010'
     WEB_HOST_PORT        = '3010'
     RUNNER_HOST_PORT     = '8090'
     POSTGRES_HOST_PORT   = '5433'
     REDIS_HOST_PORT      = '6380'
-    NGINX_HTTP_PORT      = '80'
-    NGINX_HTTPS_PORT     = '443'
   }
 
   stages {
@@ -69,17 +65,7 @@ pipeline {
           test -f backend/scripts/jenkins_smoke.py || { echo "ERROR: jenkins_smoke.py missing"; exit 1; }
           test -f scripts/normalize_deploy_env.py || { echo "ERROR: normalize_deploy_env.py missing"; exit 1; }
           test -f ai-code-player.env.example || { echo "ERROR: ai-code-player.env.example missing"; exit 1; }
-          test -f scripts/install_host_nginx.sh || { echo "ERROR: scripts/install_host_nginx.sh missing"; exit 1; }
-          test -f deploy/nginx.conf || { echo "ERROR: deploy/nginx.conf missing"; exit 1; }
-          test -f deploy/nginx/Dockerfile || { echo "ERROR: deploy/nginx/Dockerfile missing"; exit 1; }
-          test -f deploy/nginx/default.conf || { echo "ERROR: deploy/nginx/default.conf missing"; exit 1; }
-          test -f deploy/nginx/https.conf.template || { echo "ERROR: deploy/nginx/https.conf.template missing"; exit 1; }
-          test -f deploy/nginx/https-envmanager.conf.template || { echo "ERROR: deploy/nginx/https-envmanager.conf.template missing"; exit 1; }
-          test -f deploy/nginx/40-https.sh || { echo "ERROR: deploy/nginx/40-https.sh missing"; exit 1; }
-          test -f deploy/edge.d/00-http.conf || { echo "ERROR: deploy/edge.d/00-http.conf missing"; exit 1; }
-          test -f deploy/edge-https.conf.template || { echo "ERROR: deploy/edge-https.conf.template missing"; exit 1; }
-          test -f deploy/host-nginx-aicoder.conf || { echo "ERROR: deploy/host-nginx-aicoder.conf missing"; exit 1; }
-          test -f deploy/host-nginx-aicoder.http.conf || { echo "ERROR: deploy/host-nginx-aicoder.http.conf missing"; exit 1; }
+          echo "Public :80/:443 is the doxstation-proxy repo, not this job."
         '''
       }
     }
@@ -187,8 +173,9 @@ pipeline {
           set +e
           echo "=== Stop previous AI Coding Tutor containers ==="
           docker compose -f docker-compose.yml down --remove-orphans || true
-          docker rm -f aicoder-backend-1 aicoder-frontend-1 aicoder-postgres-1 aicoder-redis-1 aicoder-code-runner-1 aicoder-worker-1 aicoder-nginx-1 aicoder-edge-1 2>/dev/null || true
+          docker rm -f aicoder-backend-1 aicoder-frontend-1 aicoder-postgres-1 aicoder-redis-1 aicoder-code-runner-1 aicoder-worker-1 aicoder-nginx-1 2>/dev/null || true
           docker rmi -f ai-coder-api:latest ai-coder-web:latest ai-coder-runner:latest aicoder-nginx:latest 2>/dev/null || true
+          echo "=== Leave doxstation-edge running (doxstation-proxy) ==="
         '''
       }
     }
@@ -209,10 +196,8 @@ pipeline {
             -t ${WEB_IMAGE} -t ${WEB_IMAGE_LATEST} \
             ./frontend
 
-          echo "Building nginx image..."
-          docker build -t ${NGINX_IMAGE} -t ${NGINX_IMAGE_LATEST} ./deploy/nginx
-
-          docker images | grep -E 'ai-coder|aicoder-nginx' | head -n 20 || docker images | head -n 12
+          echo "Skipping doxstation-edge. Public :80/:443 deploys from the doxstation-proxy repo."
+          docker images | grep -E 'ai-coder' | head -n 20 || docker images | head -n 12
         '''
       }
     }
@@ -252,11 +237,8 @@ pipeline {
           export RUNNER_HOST_PORT="${RUNNER_HOST_PORT:-8090}"
           export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5433}"
           export REDIS_HOST_PORT="${REDIS_HOST_PORT:-6380}"
-          export NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-80}"
-          export NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-443}"
-          export NGINX_SERVER_NAME="play.doxstation.com"
 
-          echo "Publishing UI ${WEB_HOST_PORT} API ${API_HOST_PORT} nginx ${NGINX_HTTP_PORT}/${NGINX_HTTPS_PORT}"
+          echo "Publishing UI ${WEB_HOST_PORT} API ${API_HOST_PORT}. Not touching the doxstation edge."
           docker compose -f docker-compose.yml down --remove-orphans || true
 
           echo "Starting Postgres + Redis + sandbox..."
@@ -274,8 +256,10 @@ pipeline {
             sleep 2
           done
 
-          echo "Starting API, worker, frontend, nginx (play.doxstation.com on :80)..."
-          docker compose -f docker-compose.yml up -d --build backend worker frontend nginx
+          echo "Starting API, worker, frontend (no public nginx in aicoder)..."
+          docker compose -f docker-compose.yml up -d --build backend worker frontend
+
+          echo "Leaving Compose project doxstation running. Proxy changes deploy from doxstation-proxy."
 
           echo "Waiting for API health..."
           i=1
@@ -319,32 +303,8 @@ pipeline {
             echo "WARN: could not fetch web HTML from inside container"
             docker compose -f docker-compose.yml logs frontend --tail=40 || true
           fi
-          echo "=== Public nginx ==="
-          docker compose -f docker-compose.yml exec -T nginx wget -qO- --header='Host: play.doxstation.com' http://127.0.0.1/ >/tmp/aicoder_nginx.html 2>/dev/null \
-            || docker compose -f docker-compose.yml exec -T frontend wget -qO- --header='Host: play.doxstation.com' http://nginx/ >/tmp/aicoder_nginx.html 2>/dev/null \
-            || true
-          if [ -s /tmp/aicoder_nginx.html ]; then
-            echo "nginx_ok bytes=$(wc -c </tmp/aicoder_nginx.html)"
-          else
-            echo "WARN: nginx did not answer yet — Host Nginx stage will start it"
-            docker compose -f docker-compose.yml logs nginx --tail=40 || true
-          fi
-        '''
-      }
-    }
-
-    stage('Host Nginx') {
-      when {
-        expression { return !params.SKIP_DEPLOY }
-      }
-      steps {
-        sh '''
-          set -e
-          echo "=== Docker nginx on :80/:443 for play.doxstation.com ==="
-          export PUBLIC_APP_URL="${PUBLIC_APP_URL:-https://play.doxstation.com}"
-          export PUBLIC_HOST="${PUBLIC_APP_URL}"
-          export NGINX_SERVER_NAME="play.doxstation.com"
-          bash scripts/install_host_nginx.sh
+          echo "=== Public edge ==="
+          echo "Not managed by this job. Deploy nginx from the doxstation-proxy repository."
         '''
       }
     }
@@ -355,8 +315,8 @@ pipeline {
       echo "AI Coding Tutor ${params.DEPLOY_ENV} build #${env.BUILD_NUMBER} succeeded"
       echo "UI: ${params.PUBLIC_APP_URL}"
       echo "API: host port ${env.API_HOST_PORT} /api/v1/health"
-      echo "HTTP:  http://play.doxstation.com  (Compose nginx :80 → frontend)"
-      echo "HTTPS: ${params.PUBLIC_APP_URL} (Compose nginx :443 after Let's Encrypt)"
+      echo "HTTP:  http://play.doxstation.com  (doxstation edge :80 → host :3010)"
+      echo "HTTPS: ${params.PUBLIC_APP_URL} (edge is deployed from doxstation-proxy)"
     }
     failure {
       echo "AI Coding Tutor build #${env.BUILD_NUMBER} failed — check stage logs"

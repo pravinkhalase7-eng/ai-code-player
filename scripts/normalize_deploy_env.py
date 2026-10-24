@@ -52,8 +52,6 @@ def main() -> None:
         text = upsert(text, "PUBLIC_APP_URL", public)
         text = upsert(text, "CORS_ORIGINS", f"{public},{extras}")
         text = upsert(text, "NEXT_PUBLIC_API_URL", public)
-        text = upsert(text, "NGINX_HTTP_PORT", "80")
-        text = upsert(text, "NGINX_HTTPS_PORT", "443")
 
     if not read_value(text, "GEMINI_API_KEY"):
         raise SystemExit("ERROR: GEMINI_API_KEY is empty in the secret file. Fill it, re-upload, rebuild.")

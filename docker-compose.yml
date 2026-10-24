@@ -1,3 +1,5 @@
+# Public :80/:443 is the doxstation-proxy repository (Compose project doxstation).
+# This stack only publishes the tutor UI/API (Jenkins: 3010 / 8010).
 services:
   postgres:
     image: postgres:16-alpine
@@ -134,35 +136,6 @@ services:
       - "3100:3100"
     environment:
       API_ORIGIN: http://backend:8000
-
-  # Public :80/:443. Config is baked into the image — Jenkins docker.sock cannot
-  # bind-mount ./deploy/edge.d from the Jenkins workspace path on the host.
-  nginx:
-    build:
-      context: ./deploy/nginx
-      dockerfile: Dockerfile
-    image: aicoder-nginx:${IMAGE_TAG:-latest}
-    restart: unless-stopped
-    environment:
-      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-play.doxstation.com}
-    # Reach AI Teacher, Short Video Maker, DocVault, and Env Manager from inside this container.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    ports:
-      - "${NGINX_HTTP_PORT:-80}:80"
-      - "${NGINX_HTTPS_PORT:-443}:443"
-    volumes:
-      - /var/www/html:/var/www/html:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-    depends_on:
-      - frontend
-      - backend
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
-      interval: 10s
-      timeout: 5s
-      retries: 8
-      start_period: 10s
 
 volumes:
   postgres_data:
