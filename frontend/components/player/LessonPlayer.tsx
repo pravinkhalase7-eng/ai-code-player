@@ -19,7 +19,7 @@ import { audioSrc, cn } from "@/lib/utils";
 import { firstMeaningfulHighlight } from "@/lib/codeFocus";
 import { stripDurationNoise } from "@/lib/reelHeadlines";
 import { buildCues, cueAt } from "@/lib/narrationSync";
-import { measureSpeechEnd } from "@/lib/speechEnvelope";
+import { measureSpeechBounds } from "@/lib/speechEnvelope";
 import { isTrickyQuizLesson, quizHoldSeconds } from "@/lib/trickyQuiz";
 import { SPOKEN_LANGUAGES } from "@/lib/spokenLanguage";
 import type { ExecutionStep, HighlightRange, Lesson, LessonScene, RunHelp, TutorExpression } from "@/types/lesson";
@@ -75,10 +75,19 @@ export function LessonPlayer({
   const [scriptBusy, setScriptBusy] = useState("");
   const [scriptError, setScriptError] = useState("");
   const [syncEpoch, setSyncEpoch] = useState(0);
+  const [runnerSplit, setRunnerSplit] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem("aicoder.runnerSplit") === "1";
+    } catch {
+      return false;
+    }
+  });
   const pendingPlay = useRef(false);
   const indexRef = useRef(index);
   const playingRef = useRef(playing);
   const clipDurationRef = useRef(0);
+  const speechStartRef = useRef(0);
   indexRef.current = index;
   playingRef.current = playing;
   clipDurationRef.current = clipDuration;
@@ -94,6 +103,7 @@ export function LessonPlayer({
     setCurrentTime(0);
     setClipDuration(0);
     clipDurationRef.current = 0;
+    speechStartRef.current = 0;
     if (scene?.type === "code") {
       setHighlight(firstMeaningfulHighlight(scene.code || exampleCode, scene.highlight_ranges ?? []) ?? null);
     } else if (scene?.type === "execution") {
@@ -110,14 +120,17 @@ export function LessonPlayer({
   useEffect(() => {
     const url = audioSrc(scene?.audio_url);
     if (!url) {
+      speechStartRef.current = 0;
       setClipDuration(Math.max(0.4, Number(scene?.duration) || 0));
       return undefined;
     }
     let cancelled = false;
-    void measureSpeechEnd(url).then((end) => {
-      if (cancelled || !end || end < 0.4) return;
-      clipDurationRef.current = end;
-      setClipDuration(end);
+    void measureSpeechBounds(url).then((bounds) => {
+      if (cancelled || !bounds) return;
+      speechStartRef.current = bounds.start;
+      const spoken = Math.max(0.4, bounds.end - bounds.start);
+      clipDurationRef.current = spoken;
+      setClipDuration(spoken);
     });
     return () => {
       cancelled = true;
@@ -175,16 +188,23 @@ export function LessonPlayer({
     el.volume = 1;
     el.muted = false;
     el.playbackRate = rate;
+    const bounds = await measureSpeechBounds(url);
+    if (scenes[indexRef.current]?.id !== target?.id) return;
+    speechStartRef.current = bounds?.start ?? 0;
+    if (bounds) {
+      const spoken = Math.max(0.4, bounds.end - bounds.start);
+      clipDurationRef.current = spoken;
+      setClipDuration(spoken);
+    }
     const applyStart = () => {
-      const at = startAt === undefined ? (sameClip ? 0 : undefined) : startAt;
-      if (at === undefined) return;
+      const visualAt = startAt ?? 0;
+      const at = visualAt + (speechStartRef.current || 0);
       if (Number.isFinite(el.duration) && el.duration > 0) {
         el.currentTime = Math.min(Math.max(0, at), el.duration);
-        setCurrentTime(el.currentTime);
       } else {
         el.currentTime = Math.max(0, at);
-        setCurrentTime(el.currentTime);
       }
+      setCurrentTime(visualAt);
     };
     el.addEventListener("loadedmetadata", applyStart, { once: true });
     try {
@@ -267,13 +287,14 @@ export function LessonPlayer({
   }
 
   function seekScene(time: number) {
+    const visual = Math.max(0, time);
     const audio = audioRef.current;
     if (audio && Number.isFinite(audio.duration) && audio.duration > 0) {
-      audio.currentTime = Math.min(Math.max(0, time), audio.duration);
-      setCurrentTime(audio.currentTime);
+      audio.currentTime = Math.min(visual + (speechStartRef.current || 0), audio.duration);
+      setCurrentTime(visual);
       return;
     }
-    setCurrentTime(Math.max(0, time));
+    setCurrentTime(visual);
   }
 
   function seekLesson(time: number) {
@@ -336,18 +357,21 @@ export function LessonPlayer({
       const audio = audioRef.current;
       const quizHold =
         isTrickyQuizLesson(lesson) && scene.type === "quiz" ? quizHoldSeconds(scene) : 0;
+      const lead = speechStartRef.current || 0;
+      const url = audioSrc(scene.audio_url);
       if (audio && Number.isFinite(audio.duration) && audio.duration > 0.4) {
         const measured = clipDurationRef.current;
+        const spokenCap = Math.max(0.4, audio.duration - lead);
         const segEnds = (scene.segments || []).map((s) => Number(s.end) || 0);
         const lastSegEnd = segEnds.length ? Math.max(...segEnds) : 0;
         if (measured > 0.4) {
-          lockedDuration = Math.min(measured, audio.duration);
+          lockedDuration = Math.min(measured, spokenCap);
           if (quizHold) lockedDuration = Math.max(lockedDuration, quizHold);
-        } else if (lastSegEnd > 1 && audio.duration > lastSegEnd + 1.2 && !quizHold) {
+        } else if (lastSegEnd > 1 && spokenCap > lastSegEnd + 1.2 && !quizHold) {
           // Prefer cue clocks over Chirp's long trailing pad.
           lockedDuration = lastSegEnd + 0.35;
         } else {
-          lockedDuration = Math.max(audio.duration, quizHold);
+          lockedDuration = Math.max(spokenCap, quizHold);
         }
         if (Math.abs(measured - lockedDuration) > 0.05) {
           clipDurationRef.current = lockedDuration;
@@ -362,16 +386,16 @@ export function LessonPlayer({
       }
       const cues = buildCues(scene, lockedDuration);
       let time = 0;
-      // Prefer real WAV clock whenever audio has advanced — wall-clock drift breaks karaoke.
-      if (
-        audio &&
-        !audio.ended &&
-        !audio.paused &&
-        Number.isFinite(audio.currentTime) &&
-        audio.readyState >= 2 &&
-        (audio.currentTime > 0.02 || !audio.paused)
-      ) {
-        time = audio.currentTime;
+      // Drive visuals from the voiced window. Wall-clock while the WAV loads made typing race the voiceover.
+      if (url) {
+        const audioReady = Boolean(audio && Number.isFinite(audio.currentTime) && audio.readyState >= 2);
+        if (audioReady && audio && !audio.paused && !audio.ended) {
+          time = Math.max(0, audio.currentTime - lead);
+        } else if (audioReady && audio && audio.paused && audio.currentTime > lead + 0.02) {
+          time = Math.max(0, audio.currentTime - lead);
+        } else {
+          time = 0;
+        }
       } else {
         time = ((Date.now() - speechStarted) / 1000) * rate;
       }
@@ -738,6 +762,7 @@ export function LessonPlayer({
             setExportLabel(progress.label);
           }
         },
+        { splitScreen: runnerSplit },
       );
       setVideoBlob(blob);
       const ext = fileExtension(blob);
@@ -951,6 +976,16 @@ export function LessonPlayer({
             sceneIndex={index}
             sceneCount={scenes.length}
             stepIndex={stepIndex}
+            splitScreen={runnerSplit}
+            onSplitScreenChange={(split) => {
+              setRunnerSplit(split);
+              setVideoBlob(null);
+              try {
+                window.localStorage.setItem("aicoder.runnerSplit", split ? "1" : "0");
+              } catch {
+                /* ignore */
+              }
+            }}
           />
         </div>
       ) : (

@@ -1,17 +1,24 @@
+import type { SyncCue } from "@/lib/narrationSync";
 import type { HighlightRange, Lesson } from "@/types/lesson";
 
 export function isProgramRunnerLesson(lesson: Lesson | null | undefined): boolean {
   return (lesson?.reel_mode || "").trim().toLowerCase() === "runner";
 }
 
-/** Reveal the snippet as if it is being typed, finishing just before the scene ends. */
-export function typedCode(code: string, currentTime: number, duration: number): string {
+/** Reveal the snippet across the spoken window so typing does not outrun the voiceover. */
+export function typedCode(
+  code: string,
+  currentTime: number,
+  duration: number,
+  cues?: SyncCue[] | null,
+): string {
   const src = code || "";
   if (!src) return "";
-  const span = Math.max(0.35, duration * 0.9);
-  const progress = Math.min(1, Math.max(0, currentTime / span));
-  const n = Math.max(0, Math.min(src.length, Math.floor(progress * src.length)));
-  return src.slice(0, n);
+  const start = cues?.[0]?.start ?? 0;
+  const end = cues?.length ? cues[cues.length - 1].end : duration;
+  const span = Math.max(0.2, end - start);
+  const progress = Math.min(1, Math.max(0, (currentTime - start) / span));
+  return src.slice(0, Math.floor(progress * src.length));
 }
 
 export function typingCaretHighlight(revealed: string): HighlightRange | null {

@@ -41,7 +41,7 @@ export function ReelCodePanel({
   }, [code, highlight, lines.length, syntax, annotations]);
 
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-white/5 px-3 py-1.5">
         <span className="h-2 w-2 rounded-full bg-red-400/80" />
         <span className="h-2 w-2 rounded-full bg-amber-300/80" />

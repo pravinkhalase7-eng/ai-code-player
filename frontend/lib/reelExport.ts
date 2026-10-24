@@ -24,6 +24,7 @@ const WIDTH = 720;
 const HEIGHT = 1280;
 
 export type ReelExportProgress = { scene: number; total: number; label: string };
+export type ReelExportOptions = { splitScreen?: boolean };
 
 function pickRecorderMime(): string {
   const types = [
@@ -1298,41 +1299,46 @@ function drawRunnerSplit(
   outputLines: string[],
   _vars: string,
   typing: boolean,
+  splitScreen = false,
 ) {
   const topic = displayTopic(lesson.topic);
   ctx.textAlign = "left";
   ctx.fillStyle = "#a1a1aa";
   ctx.font = "700 13px ui-sans-serif, system-ui";
-  ctx.fillText(`${typing ? "WATCH IT TYPE" : "WATCH IT RUN"}  ·  ${lesson.language.toUpperCase()}`, 28, 78);
+  ctx.fillText(`${typing ? "WATCH IT TYPE" : "WATCH IT RUN"}  ·  ${lesson.language.toUpperCase()}`, 28, splitScreen ? 64 : 78);
   ctx.fillStyle = "#ffffff";
-  ctx.font = "800 32px ui-sans-serif, system-ui";
-  wrapLines(ctx, topic, WIDTH - 56, 2).forEach((line, index) => {
-    ctx.fillText(line, 28, 118 + index * 36);
+  ctx.font = splitScreen ? "800 24px ui-sans-serif, system-ui" : "800 32px ui-sans-serif, system-ui";
+  wrapLines(ctx, topic, WIDTH - 56, splitScreen ? 1 : 2).forEach((line, index) => {
+    ctx.fillText(line, 28, (splitScreen ? 98 : 118) + index * (splitScreen ? 28 : 36));
   });
 
-  const top = 190;
-  const captionH = 150;
-  const boxH = HEIGHT - top - captionH;
+  const top = splitScreen ? 118 : 190;
+  const firstHalf = HEIGHT / 2;
+  const captionH = splitScreen ? HEIGHT - firstHalf - 24 : 150;
+  const boxH = splitScreen ? firstHalf - top - 8 : HEIGHT - top - captionH;
   const filename = scene.filename || "main.py";
-  const console = !typing
-    ? {
-        label: "TERMINAL",
-        lines: outputLines.map((line) => formatResultChip(line)),
-        latest: beat?.latest ? formatResultChip(beat.latest) : undefined,
-        variables: "",
-      }
-    : undefined;
+  const console =
+    !typing || splitScreen
+      ? {
+          label: "TERMINAL",
+          lines: outputLines.map((line) => formatResultChip(line)),
+          latest: beat?.latest ? formatResultChip(beat.latest) : undefined,
+          variables: "",
+        }
+      : undefined;
   const lineHighlight = typing ? typingCaretHighlight(code) : highlight;
   drawIdeWindow(ctx, 22, top, WIDTH - 44, boxH, filename, code, lineHighlight, console);
   drawRunnerChips(ctx, 22, top, WIDTH - 44, boxH, code, outputLines, beat);
 
+  const capTop = splitScreen ? firstHalf + 16 : HEIGHT - 132;
+  const capH = splitScreen ? captionH - 8 : 96;
   ctx.fillStyle = "rgba(0,0,0,0.72)";
-  roundRect(ctx, 22, HEIGHT - 132, WIDTH - 44, 96, 20);
+  roundRect(ctx, 22, capTop, WIDTH - 44, capH, 20);
   ctx.fill();
   ctx.fillStyle = "#ffffff";
-  ctx.font = "700 20px ui-sans-serif, system-ui";
-  wrapLines(ctx, caption, WIDTH - 80, 3).forEach((line, index) => {
-    ctx.fillText(line, 40, HEIGHT - 96 + index * 26);
+  ctx.font = splitScreen ? "700 26px ui-sans-serif, system-ui" : "700 20px ui-sans-serif, system-ui";
+  wrapLines(ctx, caption, WIDTH - 80, splitScreen ? 6 : 3).forEach((line, index) => {
+    ctx.fillText(line, 40, capTop + (splitScreen ? 44 : 36) + index * (splitScreen ? 34 : 26));
   });
 }
 
@@ -1383,6 +1389,7 @@ function drawFrame(
   sceneIndex: number,
   sceneCount: number,
   watermark: HTMLCanvasElement | null,
+  splitScreen = false,
 ) {
   const explainMotion = isExplainMotionLesson(lesson);
   const quizLesson = isTrickyQuizLesson(lesson);
@@ -1400,7 +1407,8 @@ function drawFrame(
       : reelBeats(scene, code, duration)
     : [];
   const beat = debugging ? reelBeatAt(beats, elapsed) : null;
-  const cue = cueAt(buildCues(scene, duration), elapsed);
+  const cues = buildCues(scene, duration);
+  const cue = cueAt(cues, elapsed);
   const highlight = debugging ? beatHighlight(beat) : (cue?.highlight ?? null);
   const caption = stripDurationNoise(cue?.text || scene.narration || "");
   const outputLines = beat?.output ?? [];
@@ -1465,7 +1473,7 @@ function drawFrame(
     drawConceptPanel(ctx, scene, elapsed, duration, topic, lesson);
   } else if (runnerLesson) {
     const typing = scene.type === "code";
-    const shown = typing ? typedCode(code, elapsed, duration) : code;
+    const shown = typing ? typedCode(code, elapsed, duration, cues) : code;
     drawRunnerSplit(
       ctx,
       lesson,
@@ -1479,6 +1487,7 @@ function drawFrame(
       outputLines,
       vars,
       typing,
+      splitScreen,
     );
   } else {
     ctx.textAlign = "center";
@@ -1624,6 +1633,7 @@ function roundRect(
 export async function exportReelVideo(
   lesson: Lesson,
   onProgress?: (progress: ReelExportProgress) => void,
+  options?: ReelExportOptions,
 ): Promise<Blob> {
   const canvas = document.createElement("canvas");
   canvas.width = WIDTH;
@@ -1684,7 +1694,19 @@ export async function exportReelVideo(
       await new Promise<void>((resolve) => {
         const tick = () => {
           const elapsed = (performance.now() - started) / 1000;
-          drawFrame(ctx, lesson, scene, elapsed, duration, lastCode, thumb, index, scenes.length, watermark);
+          drawFrame(
+            ctx,
+            lesson,
+            scene,
+            elapsed,
+            duration,
+            lastCode,
+            thumb,
+            index,
+            scenes.length,
+            watermark,
+            Boolean(options?.splitScreen),
+          );
           if (elapsed >= duration) {
             resolve();
             return;

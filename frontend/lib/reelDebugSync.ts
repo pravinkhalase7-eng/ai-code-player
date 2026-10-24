@@ -1,3 +1,4 @@
+import { buildCues } from "@/lib/narrationSync";
 import type { ExecutionStep, HighlightRange, LessonScene } from "@/types/lesson";
 
 export type ReelBeat = {
@@ -79,15 +80,19 @@ export function reelBeats(scene: LessonScene, code: string, duration: number): R
 export function debugBeats(scene: LessonScene, code: string, duration: number): ReelBeat[] {
   const steps = (scene.iterations || []).length ? scene.iterations! : printSteps(scene, code);
   if (!steps.length) return reelBeats(scene, code, duration);
-  const span = Math.max(duration, 0.4);
-  const slice = span / steps.length;
+  const cues = buildCues(scene, duration);
   const printed: string[] = [];
   return steps.map((step, index) => {
     if (step.output_line) printed.push(String(step.output_line));
     const latest = printed.length ? printed[printed.length - 1] : undefined;
+    const cue =
+      cues.find((item) => item.stepIndex === index) ||
+      (cues.length === steps.length ? cues[index] : undefined);
+    const start = cue?.start ?? (index / steps.length) * duration;
+    const end = cue?.end ?? ((index + 1) / steps.length) * duration;
     return {
-      start: index * slice,
-      end: index === steps.length - 1 ? span + 0.05 : (index + 1) * slice,
+      start,
+      end: index === steps.length - 1 ? Math.max(end, duration) + 0.05 : end,
       line: step.line || printStatementLine(code) || 1,
       label: step.label || `step ${index + 1}`,
       description: step.description || "",

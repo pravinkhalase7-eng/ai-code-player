@@ -33,6 +33,8 @@ export function ProgramRunnerStage({
   iterations = [],
   sceneIndex = 0,
   sceneCount = 2,
+  splitScreen = false,
+  onSplitScreenChange,
 }: {
   lesson: Lesson;
   scene: LessonScene;
@@ -47,6 +49,8 @@ export function ProgramRunnerStage({
   iterations?: ExecutionStep[];
   sceneIndex?: number;
   sceneCount?: number;
+  splitScreen?: boolean;
+  onSplitScreenChange?: (split: boolean) => void;
 }) {
   const typing = scene.type === "code";
   const running = scene.type === "execution" || scene.type === "terminal";
@@ -58,8 +62,9 @@ export function ProgramRunnerStage({
     () => (running ? debugBeats(timedScene, code, duration) : []),
     [running, timedScene, code, duration],
   );
+  const narrationCues = useMemo(() => buildCues(scene, duration), [scene, duration]);
   const beat = running ? reelBeatAt(beats, currentTime) : null;
-  const revealed = typing ? typedCode(code, currentTime, duration) : code;
+  const revealed = typing ? typedCode(code, currentTime, duration, narrationCues) : code;
   const activeHighlight = typing
     ? typingCaretHighlight(revealed)
     : running
@@ -69,7 +74,6 @@ export function ProgramRunnerStage({
   const latest = beat?.latest ?? (printed.length ? printed[printed.length - 1] : undefined);
   const narration = stripDurationNoise(scene.narration || caption);
   const spokenCaption = stripDurationNoise(caption);
-  const narrationCues = useMemo(() => buildCues(scene, duration), [scene, duration]);
   const karaokeCue = cueAt(narrationCues, currentTime);
   const karaokeText = stripDurationNoise(karaokeCue?.text || spokenCaption || scene.narration || "");
   const karaokeStart = karaokeCue?.start ?? 0;
@@ -111,14 +115,27 @@ export function ProgramRunnerStage({
         ))}
       </div>
 
-      <header className="relative z-10 mt-3 px-1">
+      <div
+        className={cn(
+          "mt-2 flex min-h-0 flex-col",
+          splitScreen ? "h-1/2 shrink-0" : "flex-1",
+        )}
+      >
+      <header className={cn("relative z-10 px-1", splitScreen ? "mb-1" : "mb-2")}>
         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-400">
           {typing ? "Watch it type" : "Watch it run"} · {lesson.language}
         </p>
-        <h2 className="mt-1 text-[1.65rem] font-extrabold leading-8 tracking-tight text-white">{topic}</h2>
+        <h2
+          className={cn(
+            "mt-1 font-extrabold tracking-tight text-white",
+            splitScreen ? "text-[1.15rem] leading-6" : "text-[1.65rem] leading-8",
+          )}
+        >
+          {topic}
+        </h2>
       </header>
 
-      <div className="relative z-10 mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#1e1e1e]">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#1e1e1e]">
         <ReelCodePanel
           code={revealed || " "}
           filename={filename}
@@ -127,10 +144,10 @@ export function ProgramRunnerStage({
           syntax
           annotations={annotations}
         />
-        {running ? (
-          <div className="shrink-0 border-t border-white/10 bg-black/70 px-3 py-2">
+        {running || splitScreen ? (
+          <div className={cn("shrink-0 border-t border-white/10 bg-black/70 px-3 py-2", splitScreen && "min-h-[28%]")}>
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Terminal</p>
-            <div className="max-h-28 overflow-hidden font-mono text-[13px] leading-5 text-zinc-200">
+            <div className={cn("overflow-hidden font-mono text-[13px] leading-5 text-zinc-200", splitScreen ? "max-h-24" : "max-h-28")}>
               {printed.length === 0 && !runError && !scene.stderr ? (
                 <p className="text-zinc-500">$ python {filename}</p>
               ) : (
@@ -155,14 +172,43 @@ export function ProgramRunnerStage({
           </div>
         ) : null}
       </div>
+      </div>
 
-      <div className="relative z-20 mt-2 flex shrink-0 items-end gap-2">
+      {onSplitScreenChange ? (
+        <div className="relative z-30 mt-2 flex shrink-0 items-center justify-center gap-4 rounded-full border border-white/12 bg-black/65 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-200">
+          <label className="flex cursor-pointer items-center gap-1.5">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-amber-400"
+              checked={!splitScreen}
+              onChange={() => onSplitScreenChange(false)}
+            />
+            Full screen
+          </label>
+          <label className="flex cursor-pointer items-center gap-1.5">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-amber-400"
+              checked={splitScreen}
+              onChange={() => onSplitScreenChange(true)}
+            />
+            Split screen
+          </label>
+        </div>
+      ) : null}
+
+      <div
+        className={cn(
+          "relative z-20 mt-2 flex min-h-0",
+          splitScreen ? "flex-1 flex-col items-center justify-end gap-3 pb-1" : "shrink-0 items-end gap-2",
+        )}
+      >
         <TalkingByteAvatar
           speaking={playing}
           narration={narration}
           currentTime={currentTime}
           duration={duration}
-          size="sm"
+          size={splitScreen ? "lg" : "sm"}
         />
         <KaraokeCaption
           text={karaokeText}
@@ -171,6 +217,7 @@ export function ProgramRunnerStage({
           cueStart={karaokeStart}
           cueEnd={karaokeEnd}
           segments={scene.segments}
+          className={splitScreen ? "w-full text-base" : undefined}
         />
       </div>
     </div>

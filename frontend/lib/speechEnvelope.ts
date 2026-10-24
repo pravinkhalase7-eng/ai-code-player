@@ -57,12 +57,12 @@ export function sliceAudioBuffer(ctx: AudioContext, buffer: AudioBuffer, bounds:
   return sliced;
 }
 
-const speechEndCache = new Map<string, number>();
+const speechBoundsCache = new Map<string, SpeechBounds>();
 
-/** Decode a clip once and return the last voiced second (for karaoke + scene clocks). */
-export async function measureSpeechEnd(url: string): Promise<number | null> {
+/** Decode a clip once and return where speech actually lives in the WAV. */
+export async function measureSpeechBounds(url: string): Promise<SpeechBounds | null> {
   if (!url) return null;
-  const cached = speechEndCache.get(url);
+  const cached = speechBoundsCache.get(url);
   if (cached) return cached;
   try {
     const response = await fetch(url);
@@ -71,12 +71,19 @@ export async function measureSpeechEnd(url: string): Promise<number | null> {
     try {
       const decoded = await ctx.decodeAudioData(bytes.slice(0));
       const bounds = speechBounds(decoded.getChannelData(0), decoded.sampleRate);
-      speechEndCache.set(url, bounds.end);
-      return bounds.end;
+      speechBoundsCache.set(url, bounds);
+      return bounds;
     } finally {
       void ctx.close();
     }
   } catch {
     return null;
   }
+}
+
+/** Spoken length (end - start), used as the visual/karaoke duration. */
+export async function measureSpeechEnd(url: string): Promise<number | null> {
+  const bounds = await measureSpeechBounds(url);
+  if (!bounds) return null;
+  return Math.max(0.4, bounds.end - bounds.start);
 }

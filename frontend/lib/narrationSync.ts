@@ -74,20 +74,46 @@ export function buildCues(scene: LessonScene, audioDuration?: number): SyncCue[]
   const code = scene.code || "";
 
   if (scene.type === "execution" && scene.iterations?.length) {
-    const slice = duration / scene.iterations.length;
-    return scene.iterations.map((step, index) => ({
-      start: index * slice,
-      end: (index + 1) * slice,
-      text: step.description,
-      highlight:
-        progressiveHighlight(code, scene.highlight_ranges ?? [], step.description, index, scene.iterations!.length) || {
+    const steps = scene.iterations;
+    const spokenParts: { text: string }[] = [];
+    for (const segment of scene.segments ?? []) {
+      const bits = splitSentences(segment.text || "");
+      if (bits.length) bits.forEach((text) => spokenParts.push({ text }));
+      else if (segment.text?.trim()) spokenParts.push({ text: segment.text });
+    }
+    if (!spokenParts.length) {
+      for (const text of splitSentences(scene.narration || "")) spokenParts.push({ text });
+    }
+    const speechCues = spokenParts.length
+      ? weightedCues(scene, spokenParts, duration)
+      : weightedCues(
+          scene,
+          steps.map((step) => ({ text: (step.description || step.label || "step").trim() || "step" })),
+          duration,
+        );
+    return steps.map((step, index) => {
+      const from = Math.floor((index * speechCues.length) / steps.length);
+      const to = Math.max(from, Math.floor(((index + 1) * speechCues.length) / steps.length) - 1);
+      const start = speechCues[from]?.start ?? (index / steps.length) * duration;
+      const end = speechCues[to]?.end ?? ((index + 1) / steps.length) * duration;
+      const text = speechCues
+        .slice(from, to + 1)
+        .map((cue) => cue.text)
+        .join(" ")
+        .trim();
+      return {
+        start,
+        end: index === steps.length - 1 ? duration + 0.05 : end,
+        text: text || step.description || step.label || "",
+        highlight: {
           start_line: step.line || 1,
           end_line: step.line || 1,
           start_col: 0,
           label: step.label || "step",
         },
-      stepIndex: index,
-    }));
+        stepIndex: index,
+      };
+    });
   }
 
   // Code explain: prefer fine-grained sentence cues so the selection keeps moving.
