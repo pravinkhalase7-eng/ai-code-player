@@ -9,7 +9,15 @@ import { isPosterScene, reelCta } from "@/lib/reelCta";
 import { isExplainMotionLesson, lessonExplainedTopics, synthesizeBoardSteps } from "@/lib/explainerVisuals";
 import { infoBulletAt } from "@/lib/infoReelAnim";
 import { QUIZ_LETTERS, isTrickyQuizLesson, trickyQuizState } from "@/lib/trickyQuiz";
-import { isProgramRunnerLesson, typedCode, typingCaretHighlight } from "@/lib/programRunner";
+import {
+  formatResultChip,
+  isProgramRunnerLesson,
+  printLineNumbers,
+  resultKind,
+  typedCode,
+  typingCaretHighlight,
+} from "@/lib/programRunner";
+import { syntaxColor, tokenizeLine } from "@/lib/codeSyntax";
 import { sliceAudioBuffer, speechBounds } from "@/lib/speechEnvelope";
 
 const WIDTH = 720;
@@ -276,8 +284,12 @@ function drawIdeWindow(
     }
     ctx.fillStyle = active ? "#fbbf24" : "#52525b";
     ctx.fillText(String(lineNo), x + 18, top);
-    ctx.fillStyle = active ? "#fff7ed" : "#e4e4e7";
-    ctx.fillText(line || " ", x + 48, top);
+    let tx = x + 48;
+    tokenizeLine(line || " ").forEach((token) => {
+      ctx.fillStyle = active ? "#fff7ed" : syntaxColor(token.kind);
+      ctx.fillText(token.text, tx, top);
+      tx += ctx.measureText(token.text).width;
+    });
   });
   ctx.restore();
 
@@ -1284,58 +1296,78 @@ function drawRunnerSplit(
   caption: string,
   highlight: HighlightRange | null,
   outputLines: string[],
-  vars: string,
+  _vars: string,
   typing: boolean,
 ) {
   const topic = displayTopic(lesson.topic);
   ctx.textAlign = "left";
-  ctx.fillStyle = "rgba(190,242,100,0.95)";
+  ctx.fillStyle = "#a1a1aa";
   ctx.font = "700 13px ui-sans-serif, system-ui";
-  ctx.fillText(typing ? "TYPING" : "RUNNING", 28, 72);
-  ctx.fillStyle = "rgba(165,243,252,0.9)";
-  ctx.fillText(lesson.language.toUpperCase(), 120, 72);
+  ctx.fillText(`${typing ? "WATCH IT TYPE" : "WATCH IT RUN"}  ·  ${lesson.language.toUpperCase()}`, 28, 78);
   ctx.fillStyle = "#ffffff";
-  ctx.font = "800 26px ui-sans-serif, system-ui";
-  wrapLines(ctx, topic, WIDTH - 80, 2).forEach((line, index) => {
-    ctx.fillText(line, 28, 108 + index * 30);
+  ctx.font = "800 32px ui-sans-serif, system-ui";
+  wrapLines(ctx, topic, WIDTH - 56, 2).forEach((line, index) => {
+    ctx.fillText(line, 28, 118 + index * 36);
   });
 
-  const top = 168;
-  const gap = 14;
-  const leftW = 390;
-  const rightX = 28 + leftW + gap;
-  const rightW = WIDTH - rightX - 28;
-  const boxH = HEIGHT - top - 56;
-  const filename = scene.filename || "Main.java";
+  const top = 190;
+  const captionH = 150;
+  const boxH = HEIGHT - top - captionH;
+  const filename = scene.filename || "main.py";
   const console = !typing
     ? {
-        label: beat ? `DEBUG  ·  ${beat.label}` : "DEBUG",
-        condition: beat?.condition
-          ? `${beat.condition} → ${beat.condition_result ? "true" : "false"}`
-          : undefined,
-        stopped: beat?.stopped,
-        variables: vars,
-        lines: outputLines,
-        latest: beat?.latest,
+        label: "TERMINAL",
+        lines: outputLines.map((line) => formatResultChip(line)),
+        latest: beat?.latest ? formatResultChip(beat.latest) : undefined,
+        variables: "",
       }
     : undefined;
   const lineHighlight = typing ? typingCaretHighlight(code) : highlight;
-  drawIdeWindow(ctx, 28, top, leftW, boxH, filename, code, lineHighlight, console);
+  drawIdeWindow(ctx, 22, top, WIDTH - 44, boxH, filename, code, lineHighlight, console);
+  drawRunnerChips(ctx, 22, top, WIDTH - 44, boxH, code, outputLines, beat);
 
-  roundRect(ctx, rightX, top, rightW, boxH, 22);
-  ctx.fillStyle = "rgba(11,20,12,0.94)";
+  ctx.fillStyle = "rgba(0,0,0,0.72)";
+  roundRect(ctx, 22, HEIGHT - 132, WIDTH - 44, 96, 20);
   ctx.fill();
-  ctx.strokeStyle = "rgba(190,242,100,0.28)";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  ctx.fillStyle = "rgba(190,242,100,0.95)";
-  ctx.font = "700 12px ui-sans-serif, system-ui";
-  ctx.fillText(typing ? "WHILE IT TYPES" : "WHILE IT RUNS", rightX + 18, top + 28);
   ctx.fillStyle = "#ffffff";
-  ctx.font = "700 18px ui-sans-serif, system-ui";
-  const explain = beat?.description ? `${beat.description}. ${caption}`.trim() : caption;
-  wrapLines(ctx, explain, rightW - 36, 10).forEach((line, index) => {
-    ctx.fillText(line, rightX + 18, top + 64 + index * 26);
+  ctx.font = "700 20px ui-sans-serif, system-ui";
+  wrapLines(ctx, caption, WIDTH - 80, 3).forEach((line, index) => {
+    ctx.fillText(line, 40, HEIGHT - 96 + index * 26);
+  });
+}
+
+function drawRunnerChips(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  code: string,
+  outputLines: string[],
+  beat: ReturnType<typeof reelBeatAt>,
+) {
+  if (!outputLines.length) return;
+  const lines = code.replace(/\n$/, "").split("\n");
+  const printLines = printLineNumbers(code);
+  const titleH = 38;
+  const fontSize = 17;
+  const lineH = fontSize + 6;
+  outputLines.forEach((text, index) => {
+    const lineNo = beat?.line && index === outputLines.length - 1 ? beat.line : printLines[index] || printLines[printLines.length - 1];
+    if (!lineNo) return;
+    const row = Math.max(0, lineNo - 1);
+    const top = y + titleH + 22 + row * lineH;
+    if (top > y + h - 40) return;
+    const label = formatResultChip(text);
+    const kind = resultKind(text);
+    ctx.font = "800 13px ui-sans-serif, system-ui";
+    const tw = ctx.measureText(label).width + 16;
+    const chipX = Math.min(x + w - tw - 16, x + 56 + ctx.measureText(lines[row] || "").width + 12);
+    ctx.fillStyle = kind === "ok" ? "rgba(52,211,153,0.22)" : kind === "bad" ? "rgba(251,113,133,0.22)" : "rgba(251,191,36,0.22)";
+    roundRect(ctx, chipX, top - 16, tw, 22, 8);
+    ctx.fill();
+    ctx.fillStyle = kind === "ok" ? "#6ee7b7" : kind === "bad" ? "#fda4af" : "#fde68a";
+    ctx.fillText(label, chipX + 8, top);
   });
 }
 

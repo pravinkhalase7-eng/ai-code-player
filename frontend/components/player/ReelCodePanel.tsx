@@ -2,6 +2,8 @@
 
 import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import { syntaxClass, tokenizeLine } from "@/lib/codeSyntax";
+import { formatResultChip, type ResultChip } from "@/lib/programRunner";
 import type { HighlightRange } from "@/types/lesson";
 
 export function ReelCodePanel({
@@ -9,26 +11,34 @@ export function ReelCodePanel({
   filename,
   highlight,
   caret = false,
+  syntax = false,
+  annotations = [],
 }: {
   code: string;
   filename: string;
   highlight?: HighlightRange | null;
   caret?: boolean;
+  syntax?: boolean;
+  annotations?: ResultChip[];
 }) {
   const preRef = useRef<HTMLPreElement>(null);
   const lines = (code || " ").replace(/\n$/, "").split("\n");
+  const chipByLine = new Map<number, ResultChip>();
+  for (const chip of annotations) {
+    if (!chipByLine.has(chip.line)) chipByLine.set(chip.line, chip);
+  }
 
   useLayoutEffect(() => {
     const pre = preRef.current;
     if (!pre) return;
-    let size = lines.length > 16 ? 13 : 15;
+    let size = lines.length > 16 ? 13 : syntax ? 17 : 15;
     pre.style.fontSize = `${size}px`;
-    pre.style.lineHeight = "1.5";
+    pre.style.lineHeight = syntax ? "1.65" : "1.5";
     while (size > 10 && pre.scrollWidth > pre.clientWidth + 2) {
       size -= 0.25;
       pre.style.fontSize = `${size}px`;
     }
-  }, [code, highlight, lines.length]);
+  }, [code, highlight, lines.length, syntax, annotations]);
 
   return (
     <div className="flex min-h-0 flex-col overflow-hidden">
@@ -46,6 +56,8 @@ export function ReelCodePanel({
           const active = Boolean(
             highlight && lineNo >= highlight.start_line && lineNo <= highlight.end_line,
           );
+          const chip = chipByLine.get(lineNo);
+          const tokens = syntax ? tokenizeLine(line) : null;
           return (
             <div
               key={`${lineNo}-${line}`}
@@ -57,9 +69,27 @@ export function ReelCodePanel({
             >
               <span className="select-none text-right text-zinc-600">{lineNo}</span>
               <span className="min-w-0 whitespace-pre">
-                {line || " "}
+                {tokens
+                  ? tokens.map((token, tokenIndex) => (
+                      <span key={`${tokenIndex}-${token.text}`} className={syntaxClass(token.kind)}>
+                        {token.text}
+                      </span>
+                    ))
+                  : line || " "}
                 {caret && index === lines.length - 1 ? (
                   <span className="ml-px inline-block h-[1.05em] w-[0.55ch] translate-y-[0.12em] animate-pulse bg-lime-300 align-middle" />
+                ) : null}
+                {chip ? (
+                  <span
+                    className={cn(
+                      "ml-3 inline-flex translate-y-[-1px] items-center rounded-md px-1.5 py-0.5 font-sans text-[12px] font-extrabold tracking-wide",
+                      chip.kind === "ok" && "bg-emerald-400/20 text-emerald-300",
+                      chip.kind === "bad" && "bg-rose-400/20 text-rose-300",
+                      chip.kind === "out" && "bg-amber-400/20 text-amber-200",
+                    )}
+                  >
+                    {formatResultChip(chip.text)}
+                  </span>
                 ) : null}
               </span>
             </div>

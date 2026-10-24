@@ -259,7 +259,7 @@ export function Dashboard() {
               { id: "info" as const, label: "Info reel", hint: "No program — concepts like LLMs" },
               { id: "explainer" as const, label: "Explainer", hint: "Diagrams + how it works" },
               { id: "quiz" as const, label: "Tricky quiz", hint: "Timer + MCQ, then explain" },
-              { id: "runner" as const, label: "Program runner", hint: "Type the program, explain beside it, then run" },
+              { id: "runner" as const, label: "Program runner", hint: "Type the snippet, run it, stamp the result" },
             ] as const
           ).map((item) => (
             <button
@@ -278,8 +278,8 @@ export function Dashboard() {
                 if (item.id === "quiz" && (!topic.trim() || /for loop|hashmap|language model/i.test(topic))) {
                   setTopic("tricky quiz: what does this print");
                 }
-                if (item.id === "runner" && (!topic.trim() || /hashmap|language model|tricky quiz/i.test(topic))) {
-                  setTopic("for loop");
+                if (item.id === "runner" && (!topic.trim() || /hashmap|language model|tricky quiz|for loop/i.test(topic))) {
+                  setTopic("python is vs equals for integers");
                 }
               }}
               className={cn(

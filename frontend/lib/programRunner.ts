@@ -19,3 +19,28 @@ export function typingCaretHighlight(revealed: string): HighlightRange | null {
   const line = revealed.split("\n").length;
   return { start_line: line, end_line: line, start_col: 0, label: "typing" };
 }
+
+export type ResultChip = { line: number; text: string; kind: "ok" | "bad" | "out" };
+
+export function resultKind(text: string): ResultChip["kind"] {
+  const t = String(text || "").trim().toLowerCase();
+  if (t === "true" || t === "yes") return "ok";
+  if (t === "false" || t === "no") return "bad";
+  return "out";
+}
+
+export function formatResultChip(text: string): string {
+  const raw = String(text || "").trim();
+  const kind = resultKind(raw);
+  if (kind === "ok") return `✅ ${raw || "True"}`;
+  if (kind === "bad") return `❌ ${raw || "False"}`;
+  return raw;
+}
+
+export function printLineNumbers(code: string): number[] {
+  return (code || "")
+    .split("\n")
+    .flatMap((line, index) =>
+      /\b(print|println|console\.log|System\.out)\s*\(/.test(line) ? [index + 1] : [],
+    );
+}
