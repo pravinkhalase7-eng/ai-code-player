@@ -215,9 +215,10 @@ function drawIdeWindow(
   code: string,
   highlight: HighlightRange | null,
   output?: { label: string; condition?: string; stopped?: boolean; variables: string; lines: string[]; latest?: string },
+  large = false,
 ) {
   const titleH = 38;
-  const consoleH = output ? Math.min(158, 52 + Math.max(1, output.lines.length) * 20) : 0;
+  const consoleH = output ? Math.min(large ? 190 : 158, 52 + Math.max(1, output.lines.length) * (large ? 24 : 20)) : 0;
   const codeH = Math.max(80, h - titleH - consoleH);
 
   roundRect(ctx, x, y, w, h, 22);
@@ -255,20 +256,22 @@ function drawIdeWindow(
   const lines = code.replace(/\n$/, "").split("\n");
   const innerW = w - 28;
   const innerH = codeH - 16;
-  let fontSize = 17;
-  while (fontSize > 11) {
-    ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  let fontSize = large ? 26 : 17;
+  const floor = large ? 18 : 11;
+  const lineGap = large ? 10 : 6;
+  while (fontSize > floor) {
+    ctx.font = `${large ? "600 " : ""}${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
     const maxW = Math.max(0, ...lines.map((line) => ctx.measureText((line || " ").slice(0, 140)).width));
-    const totalH = lines.length * (fontSize + 6);
-    if (maxW + 36 <= innerW && totalH <= innerH) break;
+    const totalH = lines.length * (fontSize + lineGap);
+    if (maxW + 40 <= innerW && totalH <= innerH) break;
     fontSize -= 0.5;
   }
-  const lineH = fontSize + 6;
+  const lineH = fontSize + lineGap;
   ctx.save();
   ctx.beginPath();
   ctx.rect(x + 6, y + titleH + 4, w - 12, codeH - 8);
   ctx.clip();
-  ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.font = `${large ? "600 " : ""}${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
   lines.forEach((line, index) => {
     const lineNo = index + 1;
     const top = y + titleH + 22 + index * lineH;
@@ -281,11 +284,11 @@ function drawIdeWindow(
       ctx.lineWidth = 1;
       ctx.stroke();
     }
-    ctx.fillStyle = active ? "#fbbf24" : "#52525b";
+    ctx.fillStyle = active ? "#fde68a" : large ? "#a1a1aa" : "#52525b";
     ctx.fillText(String(lineNo), x + 18, top);
-    let tx = x + 48;
+    let tx = x + (large ? 56 : 48);
     tokenizeLine(line || " ").forEach((token) => {
-      ctx.fillStyle = active ? "#fff7ed" : syntaxColor(token.kind);
+      ctx.fillStyle = active ? "#fffbeb" : syntaxColor(token.kind, large);
       ctx.fillText(token.text, tx, top);
       tx += ctx.measureText(token.text).width;
     });
@@ -320,15 +323,15 @@ function drawIdeWindow(
     const shown = output.lines.slice(-5);
     if (!shown.length) {
       ctx.fillStyle = "#71717a";
-      ctx.font = "500 13px ui-monospace, monospace";
+      ctx.font = large ? "600 16px ui-monospace, monospace" : "500 13px ui-monospace, monospace";
       ctx.fillText("waiting for print…", x + 18, cursor);
     } else {
       shown.forEach((line) => {
         const last = line === output.latest;
-        ctx.fillStyle = last ? "#fde68a" : "#d4d4d8";
-        ctx.font = `${last ? "600" : "500"} 14px ui-monospace, monospace`;
+        ctx.fillStyle = last ? "#fde68a" : "#f4f4f5";
+        ctx.font = `${last ? "700" : "600"} ${large ? 18 : 14}px ui-monospace, monospace`;
         ctx.fillText(`> ${line}`, x + 18, cursor);
-        cursor += 18;
+        cursor += large ? 22 : 18;
       });
     }
   }
@@ -1325,7 +1328,7 @@ function drawRunnerSplit(
         }
       : undefined;
   const lineHighlight = typing ? typingCaretHighlight(code) : highlight;
-  drawIdeWindow(ctx, 22, top, WIDTH - 44, boxH, filename, code, lineHighlight, console);
+  drawIdeWindow(ctx, 22, top, WIDTH - 44, boxH, filename, code, lineHighlight, console, true);
 
   const capTop = splitScreen ? firstHalf + 16 : HEIGHT - 132;
   const capH = splitScreen ? captionH - 8 : 96;

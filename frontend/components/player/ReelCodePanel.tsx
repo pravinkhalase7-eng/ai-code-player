@@ -12,6 +12,7 @@ export function ReelCodePanel({
   highlight,
   caret = false,
   syntax = false,
+  vivid = false,
   annotations = [],
 }: {
   code: string;
@@ -19,6 +20,7 @@ export function ReelCodePanel({
   highlight?: HighlightRange | null;
   caret?: boolean;
   syntax?: boolean;
+  vivid?: boolean;
   annotations?: ResultChip[];
 }) {
   const preRef = useRef<HTMLPreElement>(null);
@@ -31,14 +33,16 @@ export function ReelCodePanel({
   useLayoutEffect(() => {
     const pre = preRef.current;
     if (!pre) return;
-    let size = lines.length > 16 ? 13 : syntax ? 17 : 15;
+    let size = vivid ? (lines.length > 14 ? 22 : 26) : lines.length > 16 ? 13 : syntax ? 17 : 15;
+    const floor = vivid ? 18 : 10;
     pre.style.fontSize = `${size}px`;
-    pre.style.lineHeight = syntax ? "1.65" : "1.5";
-    while (size > 10 && pre.scrollWidth > pre.clientWidth + 2) {
+    pre.style.lineHeight = vivid ? "1.85" : syntax ? "1.65" : "1.5";
+    pre.style.fontWeight = vivid ? "600" : "";
+    while (size > floor && pre.scrollWidth > pre.clientWidth + 2) {
       size -= 0.25;
       pre.style.fontSize = `${size}px`;
     }
-  }, [code, highlight, lines.length, syntax, annotations]);
+  }, [code, highlight, lines.length, syntax, vivid, annotations]);
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
@@ -50,7 +54,13 @@ export function ReelCodePanel({
           {filename}
         </span>
       </div>
-      <pre ref={preRef} className="overflow-x-auto overflow-y-auto px-2 py-2 font-mono text-zinc-100">
+      <pre
+        ref={preRef}
+        className={cn(
+          "overflow-x-auto overflow-y-auto px-2 py-2 font-mono tracking-wide text-zinc-100",
+          vivid && "px-3 py-3 text-white",
+        )}
+      >
         {lines.map((line, index) => {
           const lineNo = index + 1;
           const active = Boolean(
@@ -63,15 +73,16 @@ export function ReelCodePanel({
               key={`${lineNo}-${line}`}
               ref={active ? (node) => node?.scrollIntoView({ block: "nearest" }) : undefined}
               className={cn(
-                "grid grid-cols-[2.2ch_minmax(0,1fr)] gap-2 rounded-sm px-1",
+                "grid gap-2 rounded-sm px-1",
+                vivid ? "grid-cols-[3ch_minmax(0,1fr)]" : "grid-cols-[2.2ch_minmax(0,1fr)]",
                 active && "bg-amber-400/25 outline outline-1 outline-amber-300/50",
               )}
             >
-              <span className="select-none text-right text-zinc-600">{lineNo}</span>
+              <span className={cn("select-none text-right", vivid ? "text-zinc-400" : "text-zinc-600")}>{lineNo}</span>
               <span className="min-w-0 whitespace-pre">
                 {tokens
                   ? tokens.map((token, tokenIndex) => (
-                      <span key={`${tokenIndex}-${token.text}`} className={syntaxClass(token.kind)}>
+                      <span key={`${tokenIndex}-${token.text}`} className={syntaxClass(token.kind, vivid)}>
                         {token.text}
                       </span>
                     ))

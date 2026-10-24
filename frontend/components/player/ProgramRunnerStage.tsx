@@ -116,11 +116,12 @@ export function ProgramRunnerStage({
           highlight={activeHighlight}
           caret={typing && revealed.length < (code || "").length}
           syntax
+          vivid
         />
         {running || splitScreen ? (
           <div className={cn("shrink-0 border-t border-white/10 bg-black/70 px-3 py-2", splitScreen && "min-h-[28%]")}>
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Terminal</p>
-            <div className={cn("overflow-hidden font-mono text-[13px] leading-5 text-zinc-200", splitScreen ? "max-h-24" : "max-h-28")}>
+            <div className={cn("overflow-hidden font-mono text-[16px] font-semibold leading-6 text-zinc-100", splitScreen ? "max-h-28" : "max-h-32")}>
               {printed.length === 0 && !runError && !scene.stderr ? (
                 <p className="text-zinc-500">$ python {filename}</p>
               ) : (

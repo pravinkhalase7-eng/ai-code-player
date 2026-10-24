@@ -26,7 +26,23 @@ export function tokenizeLine(line: string): { text: string; kind: SyntaxKind }[]
   return tokens.length ? tokens : [{ text: line, kind: "plain" }];
 }
 
-export function syntaxClass(kind: SyntaxKind): string {
+export function syntaxClass(kind: SyntaxKind, vivid = false): string {
+  if (vivid) {
+    switch (kind) {
+      case "kw":
+        return "text-[#7ec8ff]";
+      case "str":
+        return "text-[#ffc49a]";
+      case "num":
+        return "text-[#d6f5b8]";
+      case "cmt":
+        return "text-[#9adf7a]";
+      case "fn":
+        return "text-[#fff3a0]";
+      default:
+        return "text-white";
+    }
+  }
   switch (kind) {
     case "kw":
       return "text-[#569cd6]";
@@ -43,7 +59,23 @@ export function syntaxClass(kind: SyntaxKind): string {
   }
 }
 
-export function syntaxColor(kind: SyntaxKind): string {
+export function syntaxColor(kind: SyntaxKind, vivid = false): string {
+  if (vivid) {
+    switch (kind) {
+      case "kw":
+        return "#7ec8ff";
+      case "str":
+        return "#ffc49a";
+      case "num":
+        return "#d6f5b8";
+      case "cmt":
+        return "#9adf7a";
+      case "fn":
+        return "#fff3a0";
+      default:
+        return "#ffffff";
+    }
+  }
   switch (kind) {
     case "kw":
       return "#569cd6";
