@@ -1418,7 +1418,7 @@ function drawFrame(
   const showDebugPanel = debugging || runnerLesson;
 
   drawProgress(ctx, sceneIndex, sceneCount, duration > 0 ? elapsed / duration : 0);
-  drawFollowChip(ctx, cta.handle);
+  if (!runnerLesson) drawFollowChip(ctx, cta.handle);
 
   if (poster) {
     ctx.textAlign = "center";
@@ -1538,7 +1538,6 @@ function drawFrame(
   }
 
   if (runnerLesson) {
-    drawWatermark(ctx, watermark);
     return;
   }
 
