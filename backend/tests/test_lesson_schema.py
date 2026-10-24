@@ -484,7 +484,7 @@ def test_runner_reel_accepts_debug_walk() -> None:
     assert any((scene.code or "").strip() for scene in repaired.scenes if scene.type == "code")
 
 
-def test_normalize_runner_clips_code_lecture() -> None:
+def test_normalize_runner_keeps_type_and_run_explain() -> None:
     from app.agents.orchestrator import _normalize_reel
 
     lecture = (
@@ -526,5 +526,5 @@ def test_normalize_runner_clips_code_lecture() -> None:
     lesson = _normalize_reel(Lesson.model_validate(payload))
     assert {scene.type for scene in lesson.scenes} == {"code", "execution"}
     code = next(scene for scene in lesson.scenes if scene.type == "code")
-    assert len(code.narration.split()) <= 18
-    assert "System.out.println" not in code.narration
+    assert "System.out.println" in code.narration
+    assert len(code.narration.split()) > 18

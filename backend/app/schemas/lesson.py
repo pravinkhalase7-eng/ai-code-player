@@ -544,8 +544,8 @@ def _ensure_runner_reel_payload(data: dict) -> dict:
         code_scene = {
             "id": "scene_runner_code",
             "type": "code",
-            "duration": 3,
-            "narration": "Here is the program.",
+            "duration": 10,
+            "narration": "Here is the program, typed line by line.",
             "language": language,
             "code": snippet,
         }

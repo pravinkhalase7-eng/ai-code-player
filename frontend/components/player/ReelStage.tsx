@@ -15,6 +15,7 @@ import { beatHighlight, debugBeats, reelBeatAt, reelBeats } from "@/lib/reelDebu
 import { isPosterScene, reelCta } from "@/lib/reelCta";
 import { isTrickyQuizLesson, trickyQuizState } from "@/lib/trickyQuiz";
 import { isProgramRunnerLesson } from "@/lib/programRunner";
+import { ProgramRunnerStage } from "@/components/player/ProgramRunnerStage";
 import { boardKindLabel, isExplainMotionLesson, lessonExplainedTopicDetails, lessonExplainedTopics, synthesizeBoardSteps } from "@/lib/explainerVisuals";
 import { beatsFromSegments, infoBulletAt, infoBulletAtBeats, playInfoBulletBlip } from "@/lib/infoReelAnim";
 import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
@@ -217,6 +218,26 @@ export function ReelStage({
     lastBlip.current = infoAnim.active;
     playInfoBulletBlip();
   }, [playing, infoAnim?.active, infoAnim?.visibleCount]);
+
+  if (runnerLesson) {
+    return (
+      <ProgramRunnerStage
+        lesson={lesson}
+        scene={scene}
+        code={code}
+        caption={caption}
+        highlight={highlight}
+        playing={playing}
+        currentTime={currentTime}
+        duration={duration}
+        terminalLines={terminalLines}
+        runError={runError}
+        iterations={iterations}
+        sceneIndex={sceneIndex}
+        sceneCount={sceneCount}
+      />
+    );
+  }
 
   return (
     <div className="reel-stage relative flex h-full max-h-full w-auto max-w-full aspect-[9/16] flex-col overflow-hidden rounded-[2rem] border border-white/12 px-3 pb-4 pt-4 shadow-[0_30px_80px_rgba(0,0,0,0.55)]">

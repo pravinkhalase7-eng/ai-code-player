@@ -9,7 +9,7 @@ import { isPosterScene, reelCta } from "@/lib/reelCta";
 import { isExplainMotionLesson, lessonExplainedTopics, synthesizeBoardSteps } from "@/lib/explainerVisuals";
 import { infoBulletAt } from "@/lib/infoReelAnim";
 import { QUIZ_LETTERS, isTrickyQuizLesson, trickyQuizState } from "@/lib/trickyQuiz";
-import { isProgramRunnerLesson } from "@/lib/programRunner";
+import { isProgramRunnerLesson, typedCode, typingCaretHighlight } from "@/lib/programRunner";
 import { sliceAudioBuffer, speechBounds } from "@/lib/speechEnvelope";
 
 const WIDTH = 720;
@@ -1273,6 +1273,73 @@ function drawQuizPanel(
 }
 
 
+function drawRunnerSplit(
+  ctx: CanvasRenderingContext2D,
+  lesson: Lesson,
+  scene: LessonScene,
+  elapsed: number,
+  duration: number,
+  code: string,
+  beat: ReturnType<typeof reelBeatAt>,
+  caption: string,
+  highlight: HighlightRange | null,
+  outputLines: string[],
+  vars: string,
+  typing: boolean,
+) {
+  const topic = displayTopic(lesson.topic);
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(190,242,100,0.95)";
+  ctx.font = "700 13px ui-sans-serif, system-ui";
+  ctx.fillText(typing ? "TYPING" : "RUNNING", 28, 72);
+  ctx.fillStyle = "rgba(165,243,252,0.9)";
+  ctx.fillText(lesson.language.toUpperCase(), 120, 72);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "800 26px ui-sans-serif, system-ui";
+  wrapLines(ctx, topic, WIDTH - 80, 2).forEach((line, index) => {
+    ctx.fillText(line, 28, 108 + index * 30);
+  });
+
+  const top = 168;
+  const gap = 14;
+  const leftW = 390;
+  const rightX = 28 + leftW + gap;
+  const rightW = WIDTH - rightX - 28;
+  const boxH = HEIGHT - top - 56;
+  const filename = scene.filename || "Main.java";
+  const console = !typing
+    ? {
+        label: beat ? `DEBUG  ·  ${beat.label}` : "DEBUG",
+        condition: beat?.condition
+          ? `${beat.condition} → ${beat.condition_result ? "true" : "false"}`
+          : undefined,
+        stopped: beat?.stopped,
+        variables: vars,
+        lines: outputLines,
+        latest: beat?.latest,
+      }
+    : undefined;
+  const lineHighlight = typing ? typingCaretHighlight(code) : highlight;
+  drawIdeWindow(ctx, 28, top, leftW, boxH, filename, code, lineHighlight, console);
+
+  roundRect(ctx, rightX, top, rightW, boxH, 22);
+  ctx.fillStyle = "rgba(11,20,12,0.94)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(190,242,100,0.28)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = "rgba(190,242,100,0.95)";
+  ctx.font = "700 12px ui-sans-serif, system-ui";
+  ctx.fillText(typing ? "WHILE IT TYPES" : "WHILE IT RUNS", rightX + 18, top + 28);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 18px ui-sans-serif, system-ui";
+  const explain = beat?.description ? `${beat.description}. ${caption}`.trim() : caption;
+  wrapLines(ctx, explain, rightW - 36, 10).forEach((line, index) => {
+    ctx.fillText(line, rightX + 18, top + 64 + index * 26);
+  });
+}
+
+
 function drawFrame(
   ctx: CanvasRenderingContext2D,
   lesson: Lesson,
@@ -1364,6 +1431,23 @@ function drawFrame(
       lesson.reel_mode === "explainer")
   ) {
     drawConceptPanel(ctx, scene, elapsed, duration, topic, lesson);
+  } else if (runnerLesson) {
+    const typing = scene.type === "code";
+    const shown = typing ? typedCode(code, elapsed, duration) : code;
+    drawRunnerSplit(
+      ctx,
+      lesson,
+      scene,
+      elapsed,
+      duration,
+      shown,
+      beat,
+      caption,
+      highlight,
+      outputLines,
+      vars,
+      typing,
+    );
   } else {
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(165,243,252,0.9)";
@@ -1410,6 +1494,11 @@ function drawFrame(
           }
         : undefined,
     );
+  }
+
+  if (runnerLesson) {
+    drawWatermark(ctx, watermark);
+    return;
   }
 
   const viseme = visemeAt(scene.narration || "", elapsed, true, duration);

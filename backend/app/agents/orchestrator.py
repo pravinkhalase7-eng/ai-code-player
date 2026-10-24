@@ -687,17 +687,6 @@ def _normalize_quiz_reel(lesson: Lesson) -> Lesson:
     )
 
 
-def _clip_runner_code_narration(scene, max_words: int = 32):
-    """Keep the runner code scene as a snippet intro, not a code-short lecture."""
-    words = (scene.narration or "").split()
-    if len(words) <= max_words:
-        return scene
-    text = " ".join(words[:max_words]).rstrip(" ,;:")
-    if text and text[-1] not in ".!?":
-        text += "."
-    return scene.model_copy(update={"narration": text, "segments": []})
-
-
 def _normalize_reel(lesson: Lesson) -> Lesson:
     from app.schemas.lesson import ConceptScene, ExecutionScene, IntroScene, SummaryScene
 
@@ -768,8 +757,8 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
         if code_scene is None:
             code_scene = CodeScene(
                 id="scene_runner_code",
-                duration=3,
-                narration="Here is the program.",
+                duration=10,
+                narration="Here is the program, typed line by line.",
                 language=lesson.language,
                 code=snippet,
             )
@@ -794,7 +783,7 @@ def _normalize_reel(lesson: Lesson) -> Lesson:
             if scene.type not in {"code", "execution"}:
                 continue
             if scene.type == "code":
-                filled.append(_clip_runner_code_narration(scene, max_words=18))
+                filled.append(scene)
                 continue
             if scene.type == "execution" and not getattr(scene, "iterations", None):
                 steps = visualize_execution(lesson.language, getattr(scene, "code", "") or "")
@@ -1054,8 +1043,8 @@ def _fit_reel_durations(lesson: Lesson) -> Lesson:
     caps = {
         "intro": (2.4, 5.0 * scale_ratio) if runner_reel else (2.8, 8.0 * scale_ratio),
         "concept": (4.0, 16.0 * scale_ratio),
-        "code": (2.4, 4.5 * scale_ratio) if runner_reel else (4.0, 14.0 * scale_ratio),
-        "execution": (18.0, 28.0 * scale_ratio) if runner_reel else (2.8, 8.0 * scale_ratio),
+        "code": (8.0, 16.0 * scale_ratio) if runner_reel else (4.0, 14.0 * scale_ratio),
+        "execution": (14.0, 26.0 * scale_ratio) if runner_reel else (2.8, 8.0 * scale_ratio),
         "terminal": (2.4, 6.0 * scale_ratio),
         "quiz": (7.5, 12.0 * scale_ratio),
         "summary": (6.0, 16.0 * scale_ratio) if quiz_reel else (2.4, 6.0 * scale_ratio),

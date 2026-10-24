@@ -8,10 +8,12 @@ export function ReelCodePanel({
   code,
   filename,
   highlight,
+  caret = false,
 }: {
   code: string;
   filename: string;
   highlight?: HighlightRange | null;
+  caret?: boolean;
 }) {
   const preRef = useRef<HTMLPreElement>(null);
   const lines = (code || " ").replace(/\n$/, "").split("\n");
@@ -54,7 +56,12 @@ export function ReelCodePanel({
               )}
             >
               <span className="select-none text-right text-zinc-600">{lineNo}</span>
-              <span className="min-w-0 whitespace-pre">{line || " "}</span>
+              <span className="min-w-0 whitespace-pre">
+                {line || " "}
+                {caret && index === lines.length - 1 ? (
+                  <span className="ml-px inline-block h-[1.05em] w-[0.55ch] translate-y-[0.12em] animate-pulse bg-lime-300 align-middle" />
+                ) : null}
+              </span>
             </div>
           );
         })}

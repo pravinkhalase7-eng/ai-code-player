@@ -296,7 +296,8 @@ def program_runner_planner_instruction(seconds: int = 30) -> str:
     return (
         f"""
 You are the Lesson Planner Agent for a PROGRAM RUNNER — not a code-short reel.
-The video is ONLY the snippet on screen, then a debugger walking it LINE BY LINE (current line, variables, print output).
+The viewer sees the program GET TYPED on the left, with a side-by-side explanation on the right.
+Then the same program RUNS line by line, and the right side keeps explaining each step.
 Create a tight visual. Total spoken time across ALL scenes MUST be about {target} seconds ({words_lo}-{words_hi} words total).
 Set reel_seconds to {target}. Set requires_code to true. Set reel_mode to "runner". format must be "reel".
 
@@ -304,15 +305,15 @@ Required scenes IN THIS ORDER: code, execution.
 Do NOT include intro, concept, quiz, terminal, or summary. Those belong to code shorts, not this format.
 
 Hard rules:
-- Code ({span(2, 4)}): Show the FULL tiny runnable snippet. 8-18 lines max, phone-readable.
-  Narration is ONE short sentence that names the program — "Here is a for loop that prints 0, 1, 2."
-  Do NOT walk lines, quote tokens, or teach init/condition/increment here. That is the execution scene.
+- Code ({span(8, 14)}): Show the FULL tiny runnable snippet. 8-18 lines max.
+  Narration EXPLAINS the program as it is typed, line by line. Name what each part does as it appears.
+  Example: "public class Main, then the for loop, i starts at 0, while i is less than 3, print i."
   Java: public class Main in Main.java. Python: complete main.py. JavaScript: complete main.js.
-  Prefer a clear loop or sequential statements with prints so debug steps are visible (init, condition, body, increment).
-- Execution ({span(20, 26)}): SAME code as the code scene. This is almost the entire video. Narrate the debugger walk: quote the live line, say the variable values, say what prints.
+  Prefer a clear loop or sequential statements with prints so debug steps are visible.
+- Execution ({span(14, 22)}): SAME code as the code scene. Narrate the live run: quote the current line, say the variable values, say what prints.
   expected_output must be an empty list. Never invent stdout. Never claim it already ran.
-  Speak as if you are stepping: "i is 0, 0 < 5 is true, print 0, i becomes 1."
-- Spoken style: flowing spoken lines, not a lecture.
+  Speak as if you are stepping: "i is 0, 0 < 3 is true, print 0, i becomes 1."
+- Spoken style: flowing spoken lines beside the editor, not a vertical short lecture.
   Do NOT end every clause with a period. Link related clauses with commas so TTS does not pause between every sentence.
 - Never say "{target} seconds" or "in this short" in narration or titles.
 - spoken_language must match the tutor plan for all spoken lines, takeaways, and the title. Keep code tokens in English.

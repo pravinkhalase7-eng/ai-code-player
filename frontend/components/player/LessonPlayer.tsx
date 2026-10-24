@@ -10,6 +10,7 @@ import { PlayerTransport } from "@/components/player/PlayerTransport";
 import { Terminal } from "@/components/player/Terminal";
 import { TutorAvatar } from "@/components/tutor/TutorAvatar";
 import { ReelStage } from "@/components/player/ReelStage";
+import { isProgramRunnerLesson } from "@/lib/programRunner";
 import { ReelScriptStudio, type ScriptLine } from "@/components/player/ReelScriptStudio";
 import { answerQuiz, executeCode, explainRunError, generateThumbnail, getLesson, saveProgress, saveReelScript, sendChat, uploadThumbnail } from "@/lib/api";
 import { buildThumbnailPrompt } from "@/lib/thumbnailPrompt";
@@ -931,7 +932,12 @@ export function LessonPlayer({
       ) : null}
 
       {isReel ? (
-        <div className="mx-auto flex min-h-0 w-full max-w-full flex-1 items-center justify-center overflow-hidden px-0">
+        <div
+          className={cn(
+            "mx-auto flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden px-0",
+            isProgramRunnerLesson(lesson) ? "max-w-5xl" : "max-w-full",
+          )}
+        >
           <ReelStage
             lesson={{ ...lesson, thumbnail_url: thumbUrl || lesson.thumbnail_url }}
             scene={scene}
