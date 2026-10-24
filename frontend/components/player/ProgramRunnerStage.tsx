@@ -34,7 +34,6 @@ export function ProgramRunnerStage({
   sceneIndex = 0,
   sceneCount = 2,
   splitScreen = false,
-  onSplitScreenChange,
 }: {
   lesson: Lesson;
   scene: LessonScene;
@@ -50,7 +49,6 @@ export function ProgramRunnerStage({
   sceneIndex?: number;
   sceneCount?: number;
   splitScreen?: boolean;
-  onSplitScreenChange?: (split: boolean) => void;
 }) {
   const typing = scene.type === "code";
   const running = scene.type === "execution" || scene.type === "terminal";
@@ -173,29 +171,6 @@ export function ProgramRunnerStage({
         ) : null}
       </div>
       </div>
-
-      {onSplitScreenChange ? (
-        <div className="relative z-30 mt-2 flex shrink-0 items-center justify-center gap-4 rounded-full border border-white/12 bg-black/65 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-200">
-          <label className="flex cursor-pointer items-center gap-1.5">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-amber-400"
-              checked={!splitScreen}
-              onChange={() => onSplitScreenChange(false)}
-            />
-            Full screen
-          </label>
-          <label className="flex cursor-pointer items-center gap-1.5">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-amber-400"
-              checked={splitScreen}
-              onChange={() => onSplitScreenChange(true)}
-            />
-            Split screen
-          </label>
-        </div>
-      ) : null}
 
       <div
         className={cn(

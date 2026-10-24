@@ -18,7 +18,7 @@ import {
   typingCaretHighlight,
 } from "@/lib/programRunner";
 import { syntaxColor, tokenizeLine } from "@/lib/codeSyntax";
-import { sliceAudioBuffer, speechBounds } from "@/lib/speechEnvelope";
+import { sliceAudioBuffer, speechBounds, speechClockFromChannel, visualTimeFromClock } from "@/lib/speechEnvelope";
 
 const WIDTH = 720;
 const HEIGHT = 1280;
@@ -1691,14 +1691,18 @@ export async function exportReelVideo(
       }
       scheduleConceptBlips(audioCtx, dest, scene, duration);
       const started = performance.now();
+      const clock = buffer
+        ? speechClockFromChannel(buffer.getChannelData(0), buffer.sampleRate)
+        : null;
       await new Promise<void>((resolve) => {
         const tick = () => {
           const elapsed = (performance.now() - started) / 1000;
+          const visualElapsed = clock ? visualTimeFromClock(clock, elapsed) : elapsed;
           drawFrame(
             ctx,
             lesson,
             scene,
-            elapsed,
+            visualElapsed,
             duration,
             lastCode,
             thumb,

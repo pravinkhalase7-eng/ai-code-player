@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { Copy, Download, Film, ImageIcon, Play, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { sourceFilename } from "@/lib/language";
+import { isProgramRunnerLesson } from "@/lib/programRunner";
 import { buildThumbnailPrompt } from "@/lib/thumbnailPrompt";
 import type { Lesson } from "@/types/lesson";
 
@@ -30,6 +31,8 @@ export function ReelScriptStudio({
   explainOnly = false,
   onUploadThumbnail,
   onCopyPrompt,
+  splitScreen = false,
+  onSplitScreenChange,
 }: {
   lesson: Lesson;
   code: string;
@@ -46,6 +49,8 @@ export function ReelScriptStudio({
   explainOnly?: boolean;
   onUploadThumbnail?: (file: File) => Promise<void> | void;
   onCopyPrompt?: (prompt: string) => Promise<void> | void;
+  splitScreen?: boolean;
+  onSplitScreenChange?: (split: boolean) => void;
 }) {
   const locked = Boolean(busy);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -152,6 +157,36 @@ export function ReelScriptStudio({
                 No thumbnail yet — generate externally or use auto SVG.
               </p>
             )}
+            {isProgramRunnerLesson(lesson) && onSplitScreenChange ? (
+              <div className="mb-3 rounded-xl border border-white/10 bg-black/40 px-3 py-2.5">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                  Video layout
+                </p>
+                <div className="flex flex-wrap items-center gap-4 text-sm font-medium text-zinc-200">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-amber-400"
+                      checked={!splitScreen}
+                      onChange={() => onSplitScreenChange(false)}
+                    />
+                    Full screen
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-amber-400"
+                      checked={splitScreen}
+                      onChange={() => onSplitScreenChange(true)}
+                    />
+                    Split screen
+                  </label>
+                </div>
+                <p className="mt-1.5 text-xs text-zinc-500">
+                  Split keeps the program and output in the top half of the vertical frame.
+                </p>
+              </div>
+            ) : null}
             <label className="block">
               <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
                 Gemini image prompt

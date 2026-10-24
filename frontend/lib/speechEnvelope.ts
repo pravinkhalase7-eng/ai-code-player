@@ -5,6 +5,12 @@ export type SpeechBounds = {
   end: number;
 };
 
+export type SpeechClock = SpeechBounds & {
+  cumulative: number[];
+  frameSec: number;
+  total: number;
+};
+
 const FRAME_SEC = 0.02;
 const LEAD_SEC = 0.04;
 const TAIL_SEC = 0.08;
@@ -57,12 +63,63 @@ export function sliceAudioBuffer(ctx: AudioContext, buffer: AudioBuffer, bounds:
   return sliced;
 }
 
-const speechBoundsCache = new Map<string, SpeechBounds>();
+const speechClockCache = new Map<string, SpeechClock>();
 
-/** Decode a clip once and return where speech actually lives in the WAV. */
-export async function measureSpeechBounds(url: string): Promise<SpeechBounds | null> {
+export function speechClockFromChannel(channel: Float32Array, sampleRate: number): SpeechClock {
+  const bounds = speechBounds(channel, sampleRate);
+  const frame = Math.max(1, Math.floor(sampleRate * FRAME_SEC));
+  const frameSec = frame / Math.max(1, sampleRate);
+  const rms = channelRms(channel, sampleRate);
+  const cumulative: number[] = [];
+  let sum = 0;
+  for (const value of rms) {
+    sum += value * value;
+    cumulative.push(sum);
+  }
+  return {
+    ...bounds,
+    cumulative,
+    frameSec,
+    total: sum,
+  };
+}
+
+function energyAt(clock: SpeechClock, seconds: number): number {
+  if (!clock.cumulative.length) return 0;
+  const idx = Math.max(0, Math.min(clock.cumulative.length - 1, Math.floor(seconds / Math.max(1e-6, clock.frameSec))));
+  return clock.cumulative[idx] || 0;
+}
+
+/** Map raw audio.currentTime onto the voiced window using cumulative speech energy. */
+export function visualTimeFromClock(clock: SpeechClock, audioTime: number): number {
+  const span = Math.max(0.2, clock.end - clock.start);
+  const base = energyAt(clock, clock.start);
+  const spoken = Math.max(1e-9, energyAt(clock, clock.end) - base);
+  const t = Math.max(clock.start, Math.min(clock.end, audioTime));
+  return Math.max(0, Math.min(span, ((energyAt(clock, t) - base) / spoken) * span));
+}
+
+/** Inverse of visualTimeFromClock for seeking. */
+export function audioTimeFromVisual(clock: SpeechClock, visualTime: number): number {
+  const span = Math.max(0.2, clock.end - clock.start);
+  const target = Math.max(0, Math.min(1, visualTime / span));
+  const base = energyAt(clock, clock.start);
+  const spoken = Math.max(1e-9, energyAt(clock, clock.end) - base);
+  const want = base + target * spoken;
+  let lo = 0;
+  let hi = Math.max(0, clock.cumulative.length - 1);
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((clock.cumulative[mid] || 0) < want) lo = mid + 1;
+    else hi = mid;
+  }
+  return Math.max(clock.start, Math.min(clock.end, lo * clock.frameSec));
+}
+
+/** Decode a clip once and return the voiced-energy clock used by typing, debug, and karaoke. */
+export async function measureSpeechClock(url: string): Promise<SpeechClock | null> {
   if (!url) return null;
-  const cached = speechBoundsCache.get(url);
+  const cached = speechClockCache.get(url);
   if (cached) return cached;
   try {
     const response = await fetch(url);
@@ -70,15 +127,22 @@ export async function measureSpeechBounds(url: string): Promise<SpeechBounds | n
     const ctx = new AudioContext();
     try {
       const decoded = await ctx.decodeAudioData(bytes.slice(0));
-      const bounds = speechBounds(decoded.getChannelData(0), decoded.sampleRate);
-      speechBoundsCache.set(url, bounds);
-      return bounds;
+      const clock = speechClockFromChannel(decoded.getChannelData(0), decoded.sampleRate);
+      speechClockCache.set(url, clock);
+      return clock;
     } finally {
       void ctx.close();
     }
   } catch {
     return null;
   }
+}
+
+/** Decode a clip once and return where speech actually lives in the WAV. */
+export async function measureSpeechBounds(url: string): Promise<SpeechBounds | null> {
+  const clock = await measureSpeechClock(url);
+  if (!clock) return null;
+  return { start: clock.start, end: clock.end };
 }
 
 /** Spoken length (end - start), used as the visual/karaoke duration. */

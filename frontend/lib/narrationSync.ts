@@ -91,27 +91,21 @@ export function buildCues(scene: LessonScene, audioDuration?: number): SyncCue[]
           steps.map((step) => ({ text: (step.description || step.label || "step").trim() || "step" })),
           duration,
         );
-    return steps.map((step, index) => {
-      const from = Math.floor((index * speechCues.length) / steps.length);
-      const to = Math.max(from, Math.floor(((index + 1) * speechCues.length) / steps.length) - 1);
-      const start = speechCues[from]?.start ?? (index / steps.length) * duration;
-      const end = speechCues[to]?.end ?? ((index + 1) / steps.length) * duration;
-      const text = speechCues
-        .slice(from, to + 1)
-        .map((cue) => cue.text)
-        .join(" ")
-        .trim();
+    const assigned = matchStepsToCues(steps, speechCues, code);
+    return speechCues.map((cue, index) => {
+      const stepIndex = assigned[index];
+      const step = typeof stepIndex === "number" ? steps[stepIndex] : undefined;
       return {
-        start,
-        end: index === steps.length - 1 ? duration + 0.05 : end,
-        text: text || step.description || step.label || "",
-        highlight: {
-          start_line: step.line || 1,
-          end_line: step.line || 1,
-          start_col: 0,
-          label: step.label || "step",
-        },
-        stepIndex: index,
+        ...cue,
+        highlight: step
+          ? {
+              start_line: step.line || 1,
+              end_line: step.line || 1,
+              start_col: 0,
+              label: step.label || "step",
+            }
+          : cue.highlight,
+        stepIndex,
       };
     });
   }
@@ -174,6 +168,77 @@ export function buildCues(scene: LessonScene, audioDuration?: number): SyncCue[]
     sentences.map((text) => ({ text })),
     duration,
   );
+}
+
+function tokenizeSpeech(text: string): string[] {
+  return (text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_\s.+-]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 1);
+}
+
+function stepSpeechScore(
+  step: { description?: string; label?: string; output_line?: string | null; line?: number },
+  speech: string,
+  code: string,
+): number {
+  const blob = tokenizeSpeech(speech);
+  if (!blob.length) return 0;
+  const hay = new Set(blob);
+  let score = 0;
+  const output = String(step.output_line || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^["']|["']$/g, "");
+  if (output) {
+    if (hay.has(output) || speech.toLowerCase().includes(output)) score += 24;
+    if (output === "true" && hay.has("true")) score += 8;
+    if (output === "false" && hay.has("false")) score += 8;
+  }
+  for (const word of tokenizeSpeech(`${step.description || ""} ${step.label || ""}`)) {
+    if (word.length > 3 && hay.has(word)) score += 2;
+  }
+  const line = (code || "").replace(/\n$/, "").split("\n")[Math.max(0, (step.line || 1) - 1)] || "";
+  for (const id of line.match(/[A-Za-z_][A-Za-z0-9_]{1,}/g) || []) {
+    if (id.length > 2 && hay.has(id.toLowerCase())) score += 5;
+  }
+  return score;
+}
+
+function matchStepsToCues(
+  steps: { description?: string; label?: string; output_line?: string | null; line?: number }[],
+  cues: SyncCue[],
+  code: string,
+): Array<number | undefined> {
+  const assigned: Array<number | undefined> = cues.map(() => undefined);
+  if (!steps.length || !cues.length) return assigned;
+  const used = new Set<number>();
+  cues.forEach((cue, cueIndex) => {
+    let best = -1;
+    let bestScore = 0;
+    steps.forEach((step, stepIndex) => {
+      if (used.has(stepIndex)) return;
+      const score = stepSpeechScore(step, cue.text, code);
+      if (score > bestScore) {
+        bestScore = score;
+        best = stepIndex;
+      }
+    });
+    if (best >= 0 && bestScore >= 5) {
+      assigned[cueIndex] = best;
+      used.add(best);
+    }
+  });
+  let last: number | undefined;
+  for (let index = 0; index < cues.length; index += 1) {
+    if (typeof assigned[index] === "number") {
+      last = assigned[index];
+    } else {
+      assigned[index] = last;
+    }
+  }
+  return assigned;
 }
 
 export function cueAt(cues: SyncCue[], time: number): SyncCue | null {

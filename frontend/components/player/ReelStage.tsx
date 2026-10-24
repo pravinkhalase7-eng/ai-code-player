@@ -37,7 +37,6 @@ export function ReelStage({
   sceneIndex = 0,
   sceneCount = 4,
   splitScreen = false,
-  onSplitScreenChange,
 }: {
   lesson: Lesson;
   scene: LessonScene;
@@ -55,7 +54,6 @@ export function ReelStage({
   sceneIndex?: number;
   sceneCount?: number;
   splitScreen?: boolean;
-  onSplitScreenChange?: (split: boolean) => void;
 }) {
   const runnerLesson = isProgramRunnerLesson(lesson);
   const running = scene.type === "execution" || scene.type === "terminal";
@@ -240,7 +238,6 @@ export function ReelStage({
         sceneIndex={sceneIndex}
         sceneCount={sceneCount}
         splitScreen={splitScreen}
-        onSplitScreenChange={onSplitScreenChange}
       />
     );
   }

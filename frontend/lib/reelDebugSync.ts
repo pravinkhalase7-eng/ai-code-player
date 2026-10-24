@@ -81,15 +81,38 @@ export function debugBeats(scene: LessonScene, code: string, duration: number): 
   const steps = (scene.iterations || []).length ? scene.iterations! : printSteps(scene, code);
   if (!steps.length) return reelBeats(scene, code, duration);
   const cues = buildCues(scene, duration);
+  if (cues.some((cue) => typeof cue.stepIndex === "number")) {
+    const printed: string[] = [];
+    const seen = new Set<number>();
+    return cues.map((cue, index) => {
+      const stepIndex = typeof cue.stepIndex === "number" ? cue.stepIndex : undefined;
+      const step = typeof stepIndex === "number" ? steps[Math.max(0, Math.min(steps.length - 1, stepIndex))] : undefined;
+      if (step?.output_line && typeof stepIndex === "number" && !seen.has(stepIndex)) {
+        printed.push(String(step.output_line));
+        seen.add(stepIndex);
+      }
+      const latest = printed.length ? printed[printed.length - 1] : undefined;
+      return {
+        start: cue.start,
+        end: index === cues.length - 1 ? Math.max(cue.end, duration) + 0.05 : cue.end,
+        line: step?.line || printStatementLine(code) || 1,
+        label: step?.label || `step ${(stepIndex ?? 0) + 1}`,
+        description: step?.description || cue.text || "",
+        output: [...printed],
+        latest,
+        variables: (step?.variables || []).map((item) => ({ name: item.name, value: item.value })),
+        condition: step?.condition,
+        condition_result: step?.condition_result,
+        stopped: step?.stopped,
+      };
+    });
+  }
   const printed: string[] = [];
   return steps.map((step, index) => {
     if (step.output_line) printed.push(String(step.output_line));
     const latest = printed.length ? printed[printed.length - 1] : undefined;
-    const cue =
-      cues.find((item) => item.stepIndex === index) ||
-      (cues.length === steps.length ? cues[index] : undefined);
-    const start = cue?.start ?? (index / steps.length) * duration;
-    const end = cue?.end ?? ((index + 1) / steps.length) * duration;
+    const start = (index / steps.length) * duration;
+    const end = ((index + 1) / steps.length) * duration;
     return {
       start,
       end: index === steps.length - 1 ? Math.max(end, duration) + 0.05 : end,
