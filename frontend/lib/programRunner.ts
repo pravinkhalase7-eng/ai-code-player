@@ -1,11 +1,15 @@
-import { cueAt, type SyncCue } from "@/lib/narrationSync";
+import { activeWordIndex, wordsForSpan } from "@/lib/karaokeCaption";
+import type { SyncCue } from "@/lib/narrationSync";
 import type { HighlightRange, Lesson } from "@/types/lesson";
+
+/** Chirp leads estimated clocks; type slightly early so characters land with the words. */
+const TYPING_LEAD = 0.16;
 
 export function isProgramRunnerLesson(lesson: Lesson | null | undefined): boolean {
   return (lesson?.reel_mode || "").trim().toLowerCase() === "runner";
 }
 
-/** Reveal the snippet with the spoken cue: earlier lines stay, the current line types with the words. */
+/** Reveal characters in lockstep with spoken words, not a separate visual timer. */
 export function typedCode(
   code: string,
   currentTime: number,
@@ -14,32 +18,21 @@ export function typedCode(
 ): string {
   const src = code || "";
   if (!src) return "";
-  const lines = src.replace(/\n$/, "").split("\n");
   const start = cues?.[0]?.start ?? 0;
   const end = cues?.length ? cues[cues.length - 1].end : duration;
   const span = Math.max(0.2, end - start);
-  const progress = Math.min(1, Math.max(0, (currentTime - start) / span));
-  if (!cues?.length || cues.length < 2) {
-    return src.slice(0, Math.floor(progress * src.length));
+  const t = currentTime + TYPING_LEAD;
+  const spoken = (cues || []).map((cue) => cue.text).filter(Boolean).join(" ").trim();
+  const words = spoken ? wordsForSpan(spoken, start, end) : [];
+  let progress = (t - start) / span;
+  if (words.length) {
+    const index = Math.max(0, activeWordIndex(words, t));
+    const word = words[index];
+    const local = Math.min(1, Math.max(0, (t - word.start) / Math.max(0.04, word.end - word.start)));
+    progress = (index + local) / words.length;
   }
-  const targetAt = (index: number) => {
-    const cue = cues[index];
-    const highlighted = cue.highlight?.end_line || cue.highlight?.start_line;
-    if (highlighted) return Math.min(lines.length, Math.max(1, highlighted));
-    return Math.max(1, Math.round(((index + 1) / cues.length) * lines.length));
-  };
-  const cue = cueAt(cues, currentTime) || cues[0];
-  const index = Math.max(0, cues.indexOf(cue));
-  let revealed = 0;
-  for (let cursor = 0; cursor < index; cursor += 1) revealed = Math.max(revealed, targetAt(cursor));
-  const target = Math.max(revealed, targetAt(index));
-  const local = Math.min(1, Math.max(0, (currentTime - cue.start) / Math.max(0.05, cue.end - cue.start)));
-  const before = lines.slice(0, revealed).join("\n");
-  const chunk = lines.slice(revealed, target).join("\n");
-  const partial = chunk.slice(0, Math.floor(local * chunk.length));
-  if (!before) return partial;
-  if (!partial) return before;
-  return `${before}\n${partial}`;
+  progress = Math.min(1, Math.max(0, progress));
+  return src.slice(0, Math.floor(progress * src.length));
 }
 
 export function typingCaretHighlight(revealed: string): HighlightRange | null {

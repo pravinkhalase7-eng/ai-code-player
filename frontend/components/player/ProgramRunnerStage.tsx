@@ -6,14 +6,7 @@ import { KaraokeCaption } from "@/components/player/Caption";
 import { ReelCodePanel } from "@/components/player/ReelCodePanel";
 import { buildCues, cueAt } from "@/lib/narrationSync";
 import { beatHighlight, debugBeats, reelBeatAt } from "@/lib/reelDebugSync";
-import {
-  formatResultChip,
-  printLineNumbers,
-  resultKind,
-  typedCode,
-  typingCaretHighlight,
-  type ResultChip,
-} from "@/lib/programRunner";
+import { formatResultChip, typedCode, typingCaretHighlight } from "@/lib/programRunner";
 import { sourceFilename } from "@/lib/language";
 import { displayTopic, stripDurationNoise } from "@/lib/reelHeadlines";
 import { cn } from "@/lib/utils";
@@ -79,23 +72,6 @@ export function ProgramRunnerStage({
   const topic = displayTopic(lesson.topic);
   const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
   const filename = scene.filename || sourceFilename(lesson.language);
-  const printLines = useMemo(() => printLineNumbers(code), [code]);
-  const annotations = useMemo((): ResultChip[] => {
-    if (typing || !printed.length) return [];
-    const fromBeats = beats
-      .filter((item) => item.latest && currentTime >= item.start)
-      .map((item) => ({
-        line: item.line || printLines[0] || 1,
-        text: String(item.latest),
-        kind: resultKind(String(item.latest)),
-      }));
-    if (fromBeats.length) return fromBeats;
-    return printed.map((text, index) => ({
-      line: printLines[index] || printLines[printLines.length - 1] || 1,
-      text,
-      kind: resultKind(text),
-    }));
-  }, [typing, printed, beats, currentTime, printLines]);
 
   return (
     <div className="reel-stage relative flex h-full max-h-full w-auto max-w-full aspect-[9/16] flex-col overflow-hidden rounded-[2rem] border border-white/12 bg-[#1e1e1e] px-3 pb-3 pt-3 shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
@@ -140,7 +116,6 @@ export function ProgramRunnerStage({
           highlight={activeHighlight}
           caret={typing && revealed.length < (code || "").length}
           syntax
-          annotations={annotations}
         />
         {running || splitScreen ? (
           <div className={cn("shrink-0 border-t border-white/10 bg-black/70 px-3 py-2", splitScreen && "min-h-[28%]")}>

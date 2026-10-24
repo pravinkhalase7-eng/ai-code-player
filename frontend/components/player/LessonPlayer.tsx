@@ -19,12 +19,7 @@ import { audioSrc, cn } from "@/lib/utils";
 import { firstMeaningfulHighlight } from "@/lib/codeFocus";
 import { stripDurationNoise } from "@/lib/reelHeadlines";
 import { buildCues, cueAt } from "@/lib/narrationSync";
-import {
-  audioTimeFromVisual,
-  measureSpeechClock,
-  visualTimeFromClock,
-  type SpeechClock,
-} from "@/lib/speechEnvelope";
+import { measureSpeechBounds } from "@/lib/speechEnvelope";
 import { isTrickyQuizLesson, quizHoldSeconds } from "@/lib/trickyQuiz";
 import { SPOKEN_LANGUAGES } from "@/lib/spokenLanguage";
 import type { ExecutionStep, HighlightRange, Lesson, LessonScene, RunHelp, TutorExpression } from "@/types/lesson";
@@ -93,7 +88,6 @@ export function LessonPlayer({
   const playingRef = useRef(playing);
   const clipDurationRef = useRef(0);
   const speechStartRef = useRef(0);
-  const speechClockRef = useRef<SpeechClock | null>(null);
   indexRef.current = index;
   playingRef.current = playing;
   clipDurationRef.current = clipDuration;
@@ -110,7 +104,6 @@ export function LessonPlayer({
     setClipDuration(0);
     clipDurationRef.current = 0;
     speechStartRef.current = 0;
-    speechClockRef.current = null;
     if (scene?.type === "code") {
       setHighlight(firstMeaningfulHighlight(scene.code || exampleCode, scene.highlight_ranges ?? []) ?? null);
     } else if (scene?.type === "execution") {
@@ -128,16 +121,14 @@ export function LessonPlayer({
     const url = audioSrc(scene?.audio_url);
     if (!url) {
       speechStartRef.current = 0;
-      speechClockRef.current = null;
       setClipDuration(Math.max(0.4, Number(scene?.duration) || 0));
       return undefined;
     }
     let cancelled = false;
-    void measureSpeechClock(url).then((clock) => {
-      if (cancelled || !clock) return;
-      speechClockRef.current = clock;
-      speechStartRef.current = clock.start;
-      const spoken = Math.max(0.4, clock.end - clock.start);
+    void measureSpeechBounds(url).then((bounds) => {
+      if (cancelled || !bounds) return;
+      speechStartRef.current = bounds.start;
+      const spoken = Math.max(0.4, bounds.end - bounds.start);
       clipDurationRef.current = spoken;
       setClipDuration(spoken);
     });
@@ -197,20 +188,17 @@ export function LessonPlayer({
     el.volume = 1;
     el.muted = false;
     el.playbackRate = rate;
-    const clock = await measureSpeechClock(url);
+    const bounds = await measureSpeechBounds(url);
     if (scenes[indexRef.current]?.id !== target?.id) return;
-    speechClockRef.current = clock;
-    speechStartRef.current = clock?.start ?? 0;
-    if (clock) {
-      const spoken = Math.max(0.4, clock.end - clock.start);
+    speechStartRef.current = bounds?.start ?? 0;
+    if (bounds) {
+      const spoken = Math.max(0.4, bounds.end - bounds.start);
       clipDurationRef.current = spoken;
       setClipDuration(spoken);
     }
     const applyStart = () => {
       const visualAt = startAt ?? 0;
-      const at = clock
-        ? audioTimeFromVisual(clock, visualAt)
-        : visualAt + (speechStartRef.current || 0);
+      const at = visualAt + (speechStartRef.current || 0);
       if (Number.isFinite(el.duration) && el.duration > 0) {
         el.currentTime = Math.min(Math.max(0, at), el.duration);
       } else {
@@ -301,11 +289,8 @@ export function LessonPlayer({
   function seekScene(time: number) {
     const visual = Math.max(0, time);
     const audio = audioRef.current;
-    const clock = speechClockRef.current;
     if (audio && Number.isFinite(audio.duration) && audio.duration > 0) {
-      const at = clock
-        ? audioTimeFromVisual(clock, visual)
-        : visual + (speechStartRef.current || 0);
+      const at = visual + (speechStartRef.current || 0);
       audio.currentTime = Math.min(Math.max(0, at), audio.duration);
       setCurrentTime(visual);
       return;
@@ -402,18 +387,13 @@ export function LessonPlayer({
       }
       const cues = buildCues(scene, lockedDuration);
       let time = 0;
-      // Drive visuals from voiced energy so typing/debug freeze in pauses and follow the words.
+      // Linear voiced clock (skip TTS lead-in). Energy warping lagged typing behind Chirp.
       if (url) {
         const audioReady = Boolean(audio && Number.isFinite(audio.currentTime) && audio.readyState >= 2);
-        const clock = speechClockRef.current;
         if (audioReady && audio && !audio.paused && !audio.ended) {
-          time = clock
-            ? visualTimeFromClock(clock, audio.currentTime)
-            : Math.max(0, audio.currentTime - lead);
+          time = Math.max(0, audio.currentTime - lead);
         } else if (audioReady && audio && audio.paused && audio.currentTime > lead + 0.02) {
-          time = clock
-            ? visualTimeFromClock(clock, audio.currentTime)
-            : Math.max(0, audio.currentTime - lead);
+          time = Math.max(0, audio.currentTime - lead);
         } else {
           time = 0;
         }

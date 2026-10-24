@@ -12,13 +12,11 @@ import { QUIZ_LETTERS, isTrickyQuizLesson, trickyQuizState } from "@/lib/trickyQ
 import {
   formatResultChip,
   isProgramRunnerLesson,
-  printLineNumbers,
-  resultKind,
   typedCode,
   typingCaretHighlight,
 } from "@/lib/programRunner";
 import { syntaxColor, tokenizeLine } from "@/lib/codeSyntax";
-import { sliceAudioBuffer, speechBounds, speechClockFromChannel, visualTimeFromClock } from "@/lib/speechEnvelope";
+import { sliceAudioBuffer, speechBounds } from "@/lib/speechEnvelope";
 
 const WIDTH = 720;
 const HEIGHT = 1280;
@@ -1328,7 +1326,6 @@ function drawRunnerSplit(
       : undefined;
   const lineHighlight = typing ? typingCaretHighlight(code) : highlight;
   drawIdeWindow(ctx, 22, top, WIDTH - 44, boxH, filename, code, lineHighlight, console);
-  drawRunnerChips(ctx, 22, top, WIDTH - 44, boxH, code, outputLines, beat);
 
   const capTop = splitScreen ? firstHalf + 16 : HEIGHT - 132;
   const capH = splitScreen ? captionH - 8 : 96;
@@ -1341,42 +1338,6 @@ function drawRunnerSplit(
     ctx.fillText(line, 40, capTop + (splitScreen ? 44 : 36) + index * (splitScreen ? 34 : 26));
   });
 }
-
-function drawRunnerChips(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  code: string,
-  outputLines: string[],
-  beat: ReturnType<typeof reelBeatAt>,
-) {
-  if (!outputLines.length) return;
-  const lines = code.replace(/\n$/, "").split("\n");
-  const printLines = printLineNumbers(code);
-  const titleH = 38;
-  const fontSize = 17;
-  const lineH = fontSize + 6;
-  outputLines.forEach((text, index) => {
-    const lineNo = beat?.line && index === outputLines.length - 1 ? beat.line : printLines[index] || printLines[printLines.length - 1];
-    if (!lineNo) return;
-    const row = Math.max(0, lineNo - 1);
-    const top = y + titleH + 22 + row * lineH;
-    if (top > y + h - 40) return;
-    const label = formatResultChip(text);
-    const kind = resultKind(text);
-    ctx.font = "800 13px ui-sans-serif, system-ui";
-    const tw = ctx.measureText(label).width + 16;
-    const chipX = Math.min(x + w - tw - 16, x + 56 + ctx.measureText(lines[row] || "").width + 12);
-    ctx.fillStyle = kind === "ok" ? "rgba(52,211,153,0.22)" : kind === "bad" ? "rgba(251,113,133,0.22)" : "rgba(251,191,36,0.22)";
-    roundRect(ctx, chipX, top - 16, tw, 22, 8);
-    ctx.fill();
-    ctx.fillStyle = kind === "ok" ? "#6ee7b7" : kind === "bad" ? "#fda4af" : "#fde68a";
-    ctx.fillText(label, chipX + 8, top);
-  });
-}
-
 
 function drawFrame(
   ctx: CanvasRenderingContext2D,
@@ -1690,18 +1651,14 @@ export async function exportReelVideo(
       }
       scheduleConceptBlips(audioCtx, dest, scene, duration);
       const started = performance.now();
-      const clock = buffer
-        ? speechClockFromChannel(buffer.getChannelData(0), buffer.sampleRate)
-        : null;
       await new Promise<void>((resolve) => {
         const tick = () => {
           const elapsed = (performance.now() - started) / 1000;
-          const visualElapsed = clock ? visualTimeFromClock(clock, elapsed) : elapsed;
           drawFrame(
             ctx,
             lesson,
             scene,
-            visualElapsed,
+            elapsed,
             duration,
             lastCode,
             thumb,
