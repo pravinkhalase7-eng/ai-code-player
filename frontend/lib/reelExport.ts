@@ -289,7 +289,7 @@ function drawIdeWindow(
   ctx.font = `${large ? "600 " : ""}${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
   lines.slice(first, first + (large ? visibleCount : lines.length)).forEach((line, index) => {
     const lineNo = first + index + 1;
-    const top = y + titleH + 22 + index * lineH;
+    const top = y + titleH + (large ? 36 : 22) + index * lineH;
     const active = Boolean(highlight && lineNo >= highlight.start_line && lineNo <= highlight.end_line);
     if (active) {
       ctx.fillStyle = "rgba(251,191,36,0.28)";
@@ -1325,7 +1325,7 @@ function drawRunnerSplit(
     ctx.fillText(line, 28, (splitScreen ? 78 : 96) + index * (splitScreen ? 28 : 36));
   });
 
-  const top = splitScreen ? 108 : 168;
+  const top = splitScreen ? 118 : 180;
   const firstHalf = HEIGHT / 2;
   const captionH = splitScreen ? HEIGHT - firstHalf - 24 : 150;
   const boxH = splitScreen ? firstHalf - top - 8 : HEIGHT - top - captionH;

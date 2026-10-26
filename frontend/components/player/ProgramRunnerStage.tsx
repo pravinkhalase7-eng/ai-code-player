@@ -95,7 +95,7 @@ export function ProgramRunnerStage({
           splitScreen ? "h-1/2 shrink-0" : "flex-1",
         )}
       >
-      <header className={cn("relative z-10 px-1", splitScreen ? "mb-1" : "mb-2")}>
+      <header className={cn("relative z-10 px-1", splitScreen ? "mb-2" : "mb-3")}>
         <h2
           className={cn(
             "font-extrabold tracking-tight text-white",

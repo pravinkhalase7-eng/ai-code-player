@@ -65,7 +65,7 @@ export function ReelCodePanel({
         ref={preRef}
         className={cn(
           "px-2 py-2 font-mono tracking-wide text-zinc-100",
-          vivid && "px-3 py-3 text-white",
+          vivid && "px-3 pb-4 pt-5 text-white",
         )}
       >
         {lines.map((line, index) => {
