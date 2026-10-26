@@ -13,9 +13,9 @@ export type SpeechClock = SpeechBounds & {
 
 const FRAME_SEC = 0.02;
 const LEAD_SEC = 0.04;
-const TAIL_SEC = 0.08;
-const ABS_FLOOR = 0.014;
-const PEAK_RATIO = 0.08;
+const TAIL_SEC = 0.45;
+const ABS_FLOOR = 0.008;
+const PEAK_RATIO = 0.035;
 
 function channelRms(channel: Float32Array, sampleRate: number): number[] {
   const frame = Math.max(1, Math.floor(sampleRate * FRAME_SEC));

@@ -28,6 +28,7 @@ export function KaraokeCaption({
   cueEnd,
   segments,
   className,
+  maxWords = 12,
 }: {
   text: string;
   currentTime: number;
@@ -36,6 +37,7 @@ export function KaraokeCaption({
   cueEnd?: number;
   segments?: SegmentLike[] | null;
   className?: string;
+  maxWords?: number;
 }) {
   const words = useMemo(
     () =>
@@ -47,7 +49,7 @@ export function KaraokeCaption({
     [text, duration, cueStart, cueEnd, segments],
   );
   const active = activeWordIndex(words, currentTime);
-  const windowWords = karaokeWindow(words, Math.max(0, active), 12);
+  const windowWords = karaokeWindow(words, Math.max(0, active), maxWords);
 
   if (!text.trim()) return null;
 

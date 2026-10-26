@@ -366,7 +366,8 @@ export function LessonPlayer({
         const segEnds = (scene.segments || []).map((s) => Number(s.end) || 0);
         const lastSegEnd = segEnds.length ? Math.max(...segEnds) : 0;
         if (measured > 0.4) {
-          lockedDuration = Math.min(measured, spokenCap);
+          // RMS end often clips the last clause ("follow for daily…"); keep a voiced tail.
+          lockedDuration = Math.min(spokenCap, Math.max(measured + 0.9, spokenCap - 0.08));
           if (quizHold) lockedDuration = Math.max(lockedDuration, quizHold);
         } else if (lastSegEnd > 1 && spokenCap > lastSegEnd + 1.2 && !quizHold) {
           // Prefer cue clocks over Chirp's long trailing pad.
@@ -416,10 +417,20 @@ export function LessonPlayer({
         if (!manualStepping && typeof cue.stepIndex === "number") setStepIndex(cue.stepIndex);
       }
       if (!advanced && lockedDuration && lockedDuration > 0.4 && time >= lockedDuration - 0.05) {
-        advanced = true;
-        audio?.pause();
-        advanceScene();
-        return;
+        const fileTail =
+          audio && Number.isFinite(audio.duration)
+            ? audio.duration - 0.12
+            : 0;
+        if (audio && !audio.ended && audio.currentTime < fileTail) {
+          lockedDuration = Math.max(lockedDuration, Math.max(0.4, audio.duration - lead));
+          clipDurationRef.current = lockedDuration;
+          setClipDuration(lockedDuration);
+        } else {
+          advanced = true;
+          audio?.pause();
+          advanceScene();
+          return;
+        }
       }
       frame = window.requestAnimationFrame(tick);
     };

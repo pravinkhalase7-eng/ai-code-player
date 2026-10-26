@@ -8,10 +8,10 @@ from pathlib import Path
 # Trim Chirp's long lead-in / tail only. Do NOT collapse mid-sentence pauses —
 # karaoke and board cues are timed to those pauses, and squeezing them desyncs captions.
 _LEAD_SEC = 0.04
-_TAIL_SEC = 0.08
+_TAIL_SEC = 0.4
 _FRAME_SEC = 0.02
-_RMS_FLOOR = 520.0
-_PEAK_RATIO = 0.08
+_RMS_FLOOR = 360.0
+_PEAK_RATIO = 0.035
 
 
 def compact_wav_silence(path: Path | str) -> float | None:

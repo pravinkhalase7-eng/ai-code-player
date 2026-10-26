@@ -1,3 +1,4 @@
+import { wordsForSpan } from "@/lib/karaokeCaption";
 import type { ExecutionStep, HighlightRange, LessonScene } from "@/types/lesson";
 
 export type ReelBeat = {
@@ -76,6 +77,91 @@ export function reelBeats(scene: LessonScene, code: string, duration: number): R
   });
 }
 
+function sourceLine(code: string, line: number | undefined): string {
+  const lines = (code || "").replace(/\n$/, "").split("\n");
+  return lines[Math.max(0, (line || 1) - 1)] || "";
+}
+
+function isRuntimeStep(step: ExecutionStep, code: string): boolean {
+  if (step.output_line) return true;
+  const raw = sourceLine(code, step.line);
+  const text = raw.trim();
+  if (!text || text.startsWith("#")) return false;
+  if (/^(class |def )/i.test(text)) return false;
+  if (/^\s+/.test(raw)) return false;
+  if (/=/.test(text) && /\(/.test(text) && !/\bprint(ln)?\s*\(/.test(text)) return false;
+  return true;
+}
+
+const STEP_STOP = new Set(["print", "println", "self", "def", "class", "this", "return", "true", "false", "none", "null"]);
+
+function stepNeedles(step: ExecutionStep, code: string): string[] {
+  const line = sourceLine(code, step.line);
+  const blob = `${step.description || ""} ${step.output_line || ""} ${line}`;
+  const quoted = [...blob.matchAll(/["']([^"']{2,48})["']/g)].map((match) => match[1]);
+  const ids = [...blob.matchAll(/[A-Za-z_][A-Za-z0-9_.]{2,}/g)].map((match) => match[0]);
+  const out = String(step.output_line || "")
+    .split(/[\s:]+/)
+    .filter((word) => word.length > 2);
+  return [...quoted, ...ids, ...out].filter((token) => {
+    const key = token.toLowerCase().replace(/[^a-z0-9_]/g, "");
+    return key.length > 2 && !STEP_STOP.has(key);
+  });
+}
+
+function tokenMatches(word: string, needle: string): boolean {
+  const a = word.toLowerCase().replace(/^[^a-z0-9_]+|[^a-z0-9_]+$/g, "");
+  const b = needle.toLowerCase().replace(/^[^a-z0-9_]+|[^a-z0-9_]+$/g, "");
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length > 3 && b.includes(a)) return true;
+  if (b.length > 3 && a.includes(b)) return true;
+  return false;
+}
+
+function alignStepsToSpeech(steps: ExecutionStep[], narration: string, code: string, duration: number): number[] {
+  const span = Math.max(duration, 0.4);
+  const words = wordsForSpan(narration || "", 0, span);
+  const starts = steps.map(() => -1);
+  let wordIndex = 0;
+  steps.forEach((step, index) => {
+    const needles = stepNeedles(step, code);
+    if (!needles.length || !words.length) return;
+    for (let cursor = wordIndex; cursor < words.length; cursor += 1) {
+      if (needles.some((needle) => tokenMatches(words[cursor].text, needle))) {
+        starts[index] = words[cursor].start;
+        wordIndex = cursor + 1;
+        return;
+      }
+    }
+  });
+  let last = 0;
+  for (let index = 0; index < starts.length; index += 1) {
+    if (starts[index] >= 0) {
+      last = starts[index];
+      continue;
+    }
+    let next = span;
+    for (let look = index + 1; look < starts.length; look += 1) {
+      if (starts[look] >= 0) {
+        next = starts[look];
+        break;
+      }
+    }
+    let run = 1;
+    while (index + run < starts.length && starts[index + run] < 0) run += 1;
+    const gap = Math.max(0.16, next - last);
+    for (let offset = 0; offset < run; offset += 1) {
+      starts[index + offset] = last + (gap * (offset + 1)) / (run + 1);
+    }
+    index += run - 1;
+  }
+  for (let index = 1; index < starts.length; index += 1) {
+    if (starts[index] < starts[index - 1]) starts[index] = starts[index - 1] + 0.04;
+  }
+  return starts.map((value) => Math.max(0, value));
+}
+
 function withMissingPrints(scene: LessonScene, steps: ExecutionStep[], code: string): ExecutionStep[] {
   const seen = new Set(
     steps.map((step) => String(step.output_line || "").trim()).filter(Boolean),
@@ -100,25 +186,24 @@ function withMissingPrints(scene: LessonScene, steps: ExecutionStep[], code: str
 
 export function debugBeats(scene: LessonScene, code: string, duration: number): ReelBeat[] {
   const raw = (scene.iterations || []).length ? scene.iterations! : printSteps(scene, code);
-  const steps = withMissingPrints(scene, raw, code);
+  const filled = withMissingPrints(scene, raw, code);
+  const runtime = filled.filter((step) => isRuntimeStep(step, code));
+  const steps = runtime.length ? runtime : filled;
   if (!steps.length) return reelBeats(scene, code, duration);
-  const weights = steps.map((step) => (step.output_line ? 3 : 1));
-  const total = weights.reduce((sum, value) => sum + value, 0) || steps.length;
   const span = Math.max(duration, 0.4);
-  let cursor = 0;
+  const starts = alignStepsToSpeech(steps, scene.narration || "", code, span);
   const printed: string[] = [];
   return steps.map((step, index) => {
     if (step.output_line) printed.push(String(step.output_line));
-    const slice = span * (weights[index] / total);
-    const start = cursor;
-    cursor += slice;
+    const start = starts[index] ?? (index / steps.length) * span;
+    const end = index === steps.length - 1 ? span + 0.05 : Math.max(start + 0.08, starts[index + 1] ?? span);
     const latest = printed.length ? printed[printed.length - 1] : undefined;
     return {
       start,
-      end: index === steps.length - 1 ? span + 0.05 : cursor,
+      end,
       line: step.line || printStatementLine(code) || 1,
       label: step.label || `step ${index + 1}`,
-      description: step.description || "",
+      description: step.description || String(step.output_line || ""),
       output: [...printed],
       latest,
       variables: (step.variables || []).map((item) => ({ name: item.name, value: item.value })),

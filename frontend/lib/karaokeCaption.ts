@@ -104,7 +104,7 @@ export function activeWordIndex(words: KaraokeWord[], time: number): number {
 /** Keep a readable window centered on the spoken word. */
 export function karaokeWindow(words: KaraokeWord[], active: number, maxWords = 12): KaraokeWord[] {
   if (!words.length) return [];
-  if (words.length <= maxWords) return words;
+  if (maxWords <= 0 || words.length <= maxWords) return words;
   const half = Math.floor(maxWords / 2);
   let start = Math.max(0, active - half);
   let end = Math.min(words.length, start + maxWords);

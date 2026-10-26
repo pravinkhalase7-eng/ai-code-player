@@ -96,12 +96,9 @@ export function ProgramRunnerStage({
         )}
       >
       <header className={cn("relative z-10 px-1", splitScreen ? "mb-1" : "mb-2")}>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-400">
-          {typing ? "Watch it type" : "Watch it run"} · {lesson.language}
-        </p>
         <h2
           className={cn(
-            "mt-1 font-extrabold tracking-tight text-white",
+            "font-extrabold tracking-tight text-white",
             splitScreen ? "text-[1.15rem] leading-6" : "text-[1.65rem] leading-8",
           )}
         >
@@ -154,10 +151,9 @@ export function ProgramRunnerStage({
           splitScreen ? "flex-1 flex-col items-center justify-end gap-3 pb-1" : "shrink-0 items-end gap-2",
         )}
       >
-        {running && beat ? (
-          <p className="w-full shrink-0 rounded-xl border border-amber-300/20 bg-amber-400/10 px-3 py-1.5 text-left text-[13px] font-semibold text-amber-100">
-            {beat.label}
-            {beat.description ? ` · ${beat.description}` : ""}
+        {running && beat?.description ? (
+          <p className="w-full shrink-0 truncate rounded-xl border border-amber-300/20 bg-amber-400/10 px-3 py-1 text-left text-[12px] font-semibold text-amber-100">
+            {beat.description}
           </p>
         ) : null}
         <TalkingByteAvatar
@@ -174,7 +170,8 @@ export function ProgramRunnerStage({
           cueStart={karaokeStart}
           cueEnd={karaokeEnd}
           segments={scene.segments}
-          className={splitScreen ? "w-full text-base" : undefined}
+          maxWords={0}
+          className={splitScreen ? "w-full text-base" : "w-full"}
         />
       </div>
     </div>

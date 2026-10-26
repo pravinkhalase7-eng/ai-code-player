@@ -56,17 +56,24 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let current = "";
-  for (const word of words) {
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index];
     const next = current ? `${current} ${word}` : word;
     if (ctx.measureText(next).width > maxWidth && current) {
       lines.push(current);
       current = word;
-      if (lines.length >= maxLines) break;
+      if (lines.length >= maxLines) {
+        current = words.slice(index).join(" ");
+        break;
+      }
     } else {
       current = next;
     }
   }
-  if (current && lines.length < maxLines) lines.push(current);
+  if (current) {
+    if (lines.length < maxLines) lines.push(current);
+    else lines[lines.length - 1] = `${lines[lines.length - 1]} ${current}`.trim();
+  }
   return lines;
 }
 
@@ -1312,16 +1319,13 @@ function drawRunnerSplit(
 ) {
   const topic = displayTopic(lesson.topic);
   ctx.textAlign = "left";
-  ctx.fillStyle = "#a1a1aa";
-  ctx.font = "700 13px ui-sans-serif, system-ui";
-  ctx.fillText(`${typing ? "WATCH IT TYPE" : "WATCH IT RUN"}  ·  ${lesson.language.toUpperCase()}`, 28, splitScreen ? 64 : 78);
   ctx.fillStyle = "#ffffff";
   ctx.font = splitScreen ? "800 24px ui-sans-serif, system-ui" : "800 32px ui-sans-serif, system-ui";
   wrapLines(ctx, topic, WIDTH - 56, splitScreen ? 1 : 2).forEach((line, index) => {
-    ctx.fillText(line, 28, (splitScreen ? 98 : 118) + index * (splitScreen ? 28 : 36));
+    ctx.fillText(line, 28, (splitScreen ? 78 : 96) + index * (splitScreen ? 28 : 36));
   });
 
-  const top = splitScreen ? 118 : 190;
+  const top = splitScreen ? 108 : 168;
   const firstHalf = HEIGHT / 2;
   const captionH = splitScreen ? HEIGHT - firstHalf - 24 : 150;
   const boxH = splitScreen ? firstHalf - top - 8 : HEIGHT - top - captionH;
@@ -1354,8 +1358,8 @@ function drawRunnerSplit(
   }
   ctx.fillStyle = "#ffffff";
   ctx.font = splitScreen ? "700 26px ui-sans-serif, system-ui" : "700 20px ui-sans-serif, system-ui";
-  wrapLines(ctx, caption, WIDTH - 80, splitScreen ? (stepText ? 4 : 6) : 3).forEach((line, index) => {
-    ctx.fillText(line, 40, captionY + index * (splitScreen ? 34 : 26));
+  wrapLines(ctx, caption, WIDTH - 80, splitScreen ? (stepText ? 5 : 8) : 5).forEach((line, index) => {
+    ctx.fillText(line, 40, captionY + index * (splitScreen ? 32 : 24));
   });
 }
 

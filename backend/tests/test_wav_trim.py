@@ -36,7 +36,7 @@ def test_compact_wav_silence_trims_trailing(tmp_path: Path) -> None:
     compact_wav_silence(dest)
     after = _duration(dest)
     assert before > 1.8
-    assert after < 0.7
+    assert after < 1.0
     assert after > 0.35
 
 
