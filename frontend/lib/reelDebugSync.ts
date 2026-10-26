@@ -1,4 +1,3 @@
-import { buildCues } from "@/lib/narrationSync";
 import type { ExecutionStep, HighlightRange, LessonScene } from "@/types/lesson";
 
 export type ReelBeat = {
@@ -77,45 +76,46 @@ export function reelBeats(scene: LessonScene, code: string, duration: number): R
   });
 }
 
+function withMissingPrints(scene: LessonScene, steps: ExecutionStep[], code: string): ExecutionStep[] {
+  const seen = new Set(
+    steps.map((step) => String(step.output_line || "").trim()).filter(Boolean),
+  );
+  const extra = (scene.expected_output || scene.stdout || []).filter(
+    (line) => !seen.has(String(line).trim()),
+  );
+  if (!extra.length) return steps;
+  const fallback = printStatementLine(code);
+  return [
+    ...steps,
+    ...extra.map((text, index) => ({
+      index: steps.length + index + 1,
+      label: `print ${seen.size + index + 1}`,
+      description: String(text),
+      line: lineForOutput(code, String(text), fallback),
+      output_line: String(text),
+      variables: [],
+    })),
+  ];
+}
+
 export function debugBeats(scene: LessonScene, code: string, duration: number): ReelBeat[] {
-  const steps = (scene.iterations || []).length ? scene.iterations! : printSteps(scene, code);
+  const raw = (scene.iterations || []).length ? scene.iterations! : printSteps(scene, code);
+  const steps = withMissingPrints(scene, raw, code);
   if (!steps.length) return reelBeats(scene, code, duration);
-  const cues = buildCues(scene, duration);
-  if (cues.some((cue) => typeof cue.stepIndex === "number")) {
-    const printed: string[] = [];
-    const seen = new Set<number>();
-    return cues.map((cue, index) => {
-      const stepIndex = typeof cue.stepIndex === "number" ? cue.stepIndex : undefined;
-      const step = typeof stepIndex === "number" ? steps[Math.max(0, Math.min(steps.length - 1, stepIndex))] : undefined;
-      if (step?.output_line && typeof stepIndex === "number" && !seen.has(stepIndex)) {
-        printed.push(String(step.output_line));
-        seen.add(stepIndex);
-      }
-      const latest = printed.length ? printed[printed.length - 1] : undefined;
-      return {
-        start: cue.start,
-        end: index === cues.length - 1 ? Math.max(cue.end, duration) + 0.05 : cue.end,
-        line: step?.line || printStatementLine(code) || 1,
-        label: step?.label || `step ${(stepIndex ?? 0) + 1}`,
-        description: step?.description || cue.text || "",
-        output: [...printed],
-        latest,
-        variables: (step?.variables || []).map((item) => ({ name: item.name, value: item.value })),
-        condition: step?.condition,
-        condition_result: step?.condition_result,
-        stopped: step?.stopped,
-      };
-    });
-  }
+  const weights = steps.map((step) => (step.output_line ? 3 : 1));
+  const total = weights.reduce((sum, value) => sum + value, 0) || steps.length;
+  const span = Math.max(duration, 0.4);
+  let cursor = 0;
   const printed: string[] = [];
   return steps.map((step, index) => {
     if (step.output_line) printed.push(String(step.output_line));
+    const slice = span * (weights[index] / total);
+    const start = cursor;
+    cursor += slice;
     const latest = printed.length ? printed[printed.length - 1] : undefined;
-    const start = (index / steps.length) * duration;
-    const end = ((index + 1) / steps.length) * duration;
     return {
       start,
-      end: index === steps.length - 1 ? Math.max(end, duration) + 0.05 : end,
+      end: index === steps.length - 1 ? span + 0.05 : cursor,
       line: step.line || printStatementLine(code) || 1,
       label: step.label || `step ${index + 1}`,
       description: step.description || "",

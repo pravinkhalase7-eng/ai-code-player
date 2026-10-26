@@ -5,7 +5,8 @@ export function isBoilerplateLine(line: string): boolean {
   if (!text) return true;
   if (/^[{}();,\[\]]+$/.test(text)) return true;
   if (/^(import|from|package|using)\b/.test(text)) return true;
-  if (/^(public\s+)?(class|interface)\s+\w+/.test(text)) return true;
+  if (/^public\s+(class|interface)\s+\w+/.test(text)) return true;
+  if (/^(class|interface)\s+\w+.*\{\s*$/.test(text)) return true;
   if (/public\s+static\s+void\s+main\s*\(/.test(text)) return true;
   if (/^(export\s+)?(default\s+)?function\s+main\b/.test(text)) return true;
   if (/^def\s+main\b/.test(text)) return true;
@@ -220,7 +221,7 @@ export function progressiveHighlight(
       : Math.round((Math.min(cueIndex, total - 1) / Math.max(1, total - 1)) * (teaching.length - 1));
   const line = teaching[Math.max(0, Math.min(teaching.length - 1, mapped))];
   const matched = highlightForSpeech(code, ranges, speech);
-  if (matched && teaching.includes(matched.start_line) && Math.abs(matched.start_line - line) <= 1) {
+  if (matched) {
     return { ...matched, start_line: matched.start_line, end_line: matched.start_line };
   }
   return {

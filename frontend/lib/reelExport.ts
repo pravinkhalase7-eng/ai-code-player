@@ -263,17 +263,25 @@ function drawIdeWindow(
     ctx.font = `${large ? "600 " : ""}${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
     const maxW = Math.max(0, ...lines.map((line) => ctx.measureText((line || " ").slice(0, 140)).width));
     const totalH = lines.length * (fontSize + lineGap);
-    if (maxW + 40 <= innerW && totalH <= innerH) break;
+    const widthOk = maxW + 40 <= innerW;
+    if (large ? widthOk : widthOk && totalH <= innerH) break;
     fontSize -= 0.5;
   }
   const lineH = fontSize + lineGap;
+  const visibleCount = Math.max(1, Math.floor(innerH / lineH));
+  let first = 0;
+  if (large && lines.length > visibleCount) {
+    const focus = Math.max(1, Math.min(lines.length, highlight?.start_line || 1));
+    first = Math.max(0, focus - Math.ceil(visibleCount * 0.4) - 1);
+    if (first + visibleCount > lines.length) first = Math.max(0, lines.length - visibleCount);
+  }
   ctx.save();
   ctx.beginPath();
   ctx.rect(x + 6, y + titleH + 4, w - 12, codeH - 8);
   ctx.clip();
   ctx.font = `${large ? "600 " : ""}${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-  lines.forEach((line, index) => {
-    const lineNo = index + 1;
+  lines.slice(first, first + (large ? visibleCount : lines.length)).forEach((line, index) => {
+    const lineNo = first + index + 1;
     const top = y + titleH + 22 + index * lineH;
     const active = Boolean(highlight && lineNo >= highlight.start_line && lineNo <= highlight.end_line);
     if (active) {
@@ -1318,15 +1326,14 @@ function drawRunnerSplit(
   const captionH = splitScreen ? HEIGHT - firstHalf - 24 : 150;
   const boxH = splitScreen ? firstHalf - top - 8 : HEIGHT - top - captionH;
   const filename = scene.filename || "main.py";
-  const console =
-    !typing || splitScreen
-      ? {
-          label: "TERMINAL",
-          lines: outputLines.map((line) => formatResultChip(line)),
-          latest: beat?.latest ? formatResultChip(beat.latest) : undefined,
-          variables: "",
-        }
-      : undefined;
+  const console = !typing
+    ? {
+        label: "TERMINAL",
+        lines: outputLines.map((line) => formatResultChip(line)),
+        latest: beat?.latest ? formatResultChip(beat.latest) : undefined,
+        variables: "",
+      }
+    : undefined;
   const lineHighlight = typing ? typingCaretHighlight(code) : highlight;
   drawIdeWindow(ctx, 22, top, WIDTH - 44, boxH, filename, code, lineHighlight, console, true);
 
@@ -1335,10 +1342,20 @@ function drawRunnerSplit(
   ctx.fillStyle = "rgba(0,0,0,0.72)";
   roundRect(ctx, 22, capTop, WIDTH - 44, capH, 20);
   ctx.fill();
+  const stepText = !typing && beat ? `${beat.label}${beat.description ? ` · ${beat.description}` : ""}` : "";
+  let captionY = capTop + (splitScreen ? 44 : 36);
+  if (stepText) {
+    ctx.fillStyle = "#fde68a";
+    ctx.font = splitScreen ? "700 18px ui-sans-serif, system-ui" : "700 16px ui-sans-serif, system-ui";
+    wrapLines(ctx, stepText, WIDTH - 80, 2).forEach((line) => {
+      ctx.fillText(line, 40, captionY);
+      captionY += splitScreen ? 26 : 22;
+    });
+  }
   ctx.fillStyle = "#ffffff";
   ctx.font = splitScreen ? "700 26px ui-sans-serif, system-ui" : "700 20px ui-sans-serif, system-ui";
-  wrapLines(ctx, caption, WIDTH - 80, splitScreen ? 6 : 3).forEach((line, index) => {
-    ctx.fillText(line, 40, capTop + (splitScreen ? 44 : 36) + index * (splitScreen ? 34 : 26));
+  wrapLines(ctx, caption, WIDTH - 80, splitScreen ? (stepText ? 4 : 6) : 3).forEach((line, index) => {
+    ctx.fillText(line, 40, captionY + index * (splitScreen ? 34 : 26));
   });
 }
 

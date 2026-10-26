@@ -55,20 +55,20 @@ export function ProgramRunnerStage({
   );
   const narrationCues = useMemo(() => buildCues(scene, duration), [scene, duration]);
   const beat = running ? reelBeatAt(beats, currentTime) : null;
+  const spokenCue = cueAt(narrationCues, currentTime);
   const revealed = typing ? typedCode(code, currentTime, duration, narrationCues) : code;
-  const activeHighlight = typing
-    ? typingCaretHighlight(revealed)
-    : running
-      ? beatHighlight(beat)
-      : highlight;
+  const activeHighlight = running
+    ? beatHighlight(beat)
+    : typing
+      ? typingCaretHighlight(revealed)
+      : spokenCue?.highlight || highlight;
   const printed = (beat?.output?.length ? beat.output : terminalLines) ?? [];
   const latest = beat?.latest ?? (printed.length ? printed[printed.length - 1] : undefined);
   const narration = stripDurationNoise(scene.narration || caption);
   const spokenCaption = stripDurationNoise(caption);
-  const karaokeCue = cueAt(narrationCues, currentTime);
-  const karaokeText = stripDurationNoise(karaokeCue?.text || spokenCaption || scene.narration || "");
-  const karaokeStart = karaokeCue?.start ?? 0;
-  const karaokeEnd = karaokeCue?.end ?? Math.max(duration, karaokeStart + 0.5);
+  const karaokeText = stripDurationNoise(spokenCue?.text || spokenCaption || scene.narration || "");
+  const karaokeStart = spokenCue?.start ?? 0;
+  const karaokeEnd = spokenCue?.end ?? Math.max(duration, karaokeStart + 0.5);
   const topic = displayTopic(lesson.topic);
   const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
   const filename = scene.filename || sourceFilename(lesson.language);
@@ -118,14 +118,14 @@ export function ProgramRunnerStage({
           syntax
           vivid
         />
-        {running || splitScreen ? (
-          <div className={cn("shrink-0 border-t border-white/10 bg-black/70 px-3 py-2", splitScreen && "min-h-[28%]")}>
+        {running ? (
+          <div className="shrink-0 border-t border-white/10 bg-black/70 px-3 py-2">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Terminal</p>
-            <div className={cn("overflow-hidden font-mono text-[16px] font-semibold leading-6 text-zinc-100", splitScreen ? "max-h-28" : "max-h-32")}>
+            <div className={cn("overflow-y-auto font-mono text-[16px] font-semibold leading-6 text-zinc-100", splitScreen ? "max-h-24" : "max-h-32")}>
               {printed.length === 0 && !runError && !scene.stderr ? (
                 <p className="text-zinc-500">$ python {filename}</p>
               ) : (
-                printed.map((line, index) => (
+                printed.slice(-6).map((line, index) => (
                   <p
                     key={`${index}-${line}`}
                     className={cn(
@@ -154,12 +154,18 @@ export function ProgramRunnerStage({
           splitScreen ? "flex-1 flex-col items-center justify-end gap-3 pb-1" : "shrink-0 items-end gap-2",
         )}
       >
+        {running && beat ? (
+          <p className="w-full shrink-0 rounded-xl border border-amber-300/20 bg-amber-400/10 px-3 py-1.5 text-left text-[13px] font-semibold text-amber-100">
+            {beat.label}
+            {beat.description ? ` · ${beat.description}` : ""}
+          </p>
+        ) : null}
         <TalkingByteAvatar
           speaking={playing}
           narration={narration}
           currentTime={currentTime}
           duration={duration}
-          size={splitScreen ? "lg" : "sm"}
+          size={splitScreen && !running ? "lg" : "sm"}
         />
         <KaraokeCaption
           text={karaokeText}

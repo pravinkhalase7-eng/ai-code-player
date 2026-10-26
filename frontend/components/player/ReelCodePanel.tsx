@@ -23,6 +23,7 @@ export function ReelCodePanel({
   vivid?: boolean;
   annotations?: ResultChip[];
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
   const lines = (code || " ").replace(/\n$/, "").split("\n");
   const chipByLine = new Map<number, ResultChip>();
@@ -32,16 +33,21 @@ export function ReelCodePanel({
 
   useLayoutEffect(() => {
     const pre = preRef.current;
-    if (!pre) return;
+    const scroller = scrollRef.current;
+    if (!pre || !scroller) return;
     let size = vivid ? (lines.length > 14 ? 22 : 26) : lines.length > 16 ? 13 : syntax ? 17 : 15;
     const floor = vivid ? 18 : 10;
     pre.style.fontSize = `${size}px`;
     pre.style.lineHeight = vivid ? "1.85" : syntax ? "1.65" : "1.5";
     pre.style.fontWeight = vivid ? "600" : "";
-    while (size > floor && pre.scrollWidth > pre.clientWidth + 2) {
+    while (size > floor && pre.scrollWidth > scroller.clientWidth + 2) {
       size -= 0.25;
       pre.style.fontSize = `${size}px`;
     }
+    const row = scroller.querySelector("[data-active-line]") as HTMLElement | null;
+    if (!row) return;
+    const next = scroller.scrollTop + (row.getBoundingClientRect().top - scroller.getBoundingClientRect().top) - scroller.clientHeight * 0.35;
+    scroller.scrollTo({ top: Math.max(0, next), behavior: "auto" });
   }, [code, highlight, lines.length, syntax, vivid, annotations]);
 
   return (
@@ -54,10 +60,11 @@ export function ReelCodePanel({
           {filename}
         </span>
       </div>
+      <div ref={scrollRef} className="h-0 min-h-0 flex-1 overflow-x-auto overflow-y-auto">
       <pre
         ref={preRef}
         className={cn(
-          "overflow-x-auto overflow-y-auto px-2 py-2 font-mono tracking-wide text-zinc-100",
+          "px-2 py-2 font-mono tracking-wide text-zinc-100",
           vivid && "px-3 py-3 text-white",
         )}
       >
@@ -71,7 +78,7 @@ export function ReelCodePanel({
           return (
             <div
               key={`${lineNo}-${line}`}
-              ref={active ? (node) => node?.scrollIntoView({ block: "nearest" }) : undefined}
+              data-active-line={active ? "" : undefined}
               className={cn(
                 "grid gap-2 rounded-sm px-1",
                 vivid ? "grid-cols-[3ch_minmax(0,1fr)]" : "grid-cols-[2.2ch_minmax(0,1fr)]",
@@ -107,6 +114,7 @@ export function ReelCodePanel({
           );
         })}
       </pre>
+      </div>
     </div>
   );
 }
